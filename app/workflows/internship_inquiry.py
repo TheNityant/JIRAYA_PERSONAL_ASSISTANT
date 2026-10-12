@@ -37,6 +37,24 @@ class InternshipInquiryWorkflow:
             }
 
         entity_id = f"gmail:{message.id}"
+
+        # Idempotency guard: once Gmail accepted a reply from Jiraya, never send another
+        # reply to the same source message automatically. A failed execution remains retryable.
+        if self.ledger.has_event(entity_id=entity_id, event_types=("EMAIL_REPLY_SENT",)):
+            self.ledger.append(
+                source="policy",
+                event_type="EMAIL_SKIPPED_ALREADY_HANDLED",
+                entity_id=entity_id,
+                correlation_id=correlation_id,
+                payload={"message_id": message.id},
+            )
+            return {
+                "correlation_id": correlation_id,
+                "message_id": message.id,
+                "decision": "ALREADY_HANDLED",
+                "verification_status": None,
+            }
+
         self.ledger.append(
             source="gmail",
             event_type="EMAIL_OBSERVED",

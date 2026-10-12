@@ -24,7 +24,7 @@ class NebiusProvider(ModelProvider):
     def model_name(self) -> str:
         return self._model
 
-    def complete(self, message: str) -> str:
+    def complete(self, message: str, *, enable_thinking: bool = True) -> str:
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -36,6 +36,11 @@ class NebiusProvider(ModelProvider):
             ],
             temperature=0,
             max_tokens=256,
+            extra_body={
+                "chat_template_kwargs": {
+                    "enable_thinking": enable_thinking,
+                }
+            },
         )
         content = completion.choices[0].message.content
         if not content:

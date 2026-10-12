@@ -1,97 +1,203 @@
 # Jiraya Personal Assistant
 
-Phase-0 implementation for the **Nebius × NVIDIA Global AI Hackathon 2026 — Personal AI** track.
+Jiraya is an evidence-aware Personal AI for the **Nebius × NVIDIA Global AI Hackathon 2026 — Personal AI** track.
 
-Long-term product loop:
+Core product loop:
 
 ```text
 Agent -> Verifier -> Event Ledger -> Reconciliator
 ```
 
-Phase 0 establishes the foundation only:
+The distinguishing mechanism is temporal outcome assurance: Jiraya records evidence that an action really succeeded, then later uses event history to distinguish an original execution failure from an outcome that was legitimately superseded or externally invalidated afterward.
 
-- FastAPI backend
-- Nebius Token Factory / NVIDIA Nemotron provider
-- PostgreSQL Event Ledger
-- health checks
-- swappable model-provider boundary
-- no external write actions yet
+## Current implementation: Phase 1 Gmail vertical slice
 
-## Prerequisites
+```text
+Unread Gmail message
+        |
+        v
+Nemotron classification
+        |
+        v
+Approved internship workflow?
+        |
+        +-- no --> NO_ACTION
+        |
+        v
+Approved reply template
+        |
+        +-- dry run --> preview only
+        |
+        v
+Gmail send
+        |
+        v
+Deterministic Gmail verification
+        |
+        +--> VERIFIED_SUCCESS
+        +--> EXECUTION_FAILED
+        +--> UNOBSERVED
+        |
+        v
+PostgreSQL Event Ledger
+```
 
-- Python 3.12+
-- Docker Desktop / Docker Engine
-- `uv` recommended
-- Nebius Token Factory API key
+Real external actions are safety-gated. `dry_run=true` is the default, and a non-dry run is still blocked while `ENABLE_EXTERNAL_ACTIONS=false`.
 
 ## Setup
 
+Use the Phase 1 branch:
+
 ```powershell
-Copy-Item .env.example .env
+git fetch origin
+git checkout phase1-gmail-agent
+git pull origin phase1-gmail-agent
 ```
 
-Set `NEBIUS_API_KEY` in `.env`, then:
+Activate your existing Python virtual environment, then install the updated dependencies:
+
+```powershell
+python -m pip install -e ".[dev]"
+```
+
+Keep PostgreSQL running:
 
 ```powershell
 docker compose up -d db
-uv sync --dev
-uv run uvicorn app.main:app --reload
 ```
 
-Open Swagger at `http://127.0.0.1:8000/docs`.
+## Gmail OAuth setup
 
-## Phase-0 checks
+In Google Cloud:
 
-- `GET /health`
-- `GET /health/db`
-- `POST /ai/smoke`
-- `POST /events`
-- `GET /events`
-- `uv run pytest`
+1. Create or select a project.
+2. Enable **Gmail API**.
+3. Configure the Google Auth Platform / OAuth consent screen.
+4. Create an **OAuth 2.0 Client ID** of type **Desktop app**.
+5. Download the client JSON and save it in the repository root as `credentials.json`.
+6. If the OAuth app is in Testing mode, add the Gmail account you will connect as a test user.
 
-### Nemotron smoke test
+Phase 1 requests only:
+
+```text
+https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.send
+```
+
+`credentials.json` and `token.json` are gitignored and must never be committed.
+
+Authorize locally:
 
 ```powershell
-$body = @{ message = "Reply with exactly: JIRAYA_NEMOTRON_OK" } | ConvertTo-Json
-Invoke-RestMethod -Method Post `
-  -Uri "http://127.0.0.1:8000/ai/smoke" `
+python -m app.integrations.gmail.auth
+```
+
+A browser window opens for Google authorization. A successful flow writes `token.json` locally. If Gmail scopes change later, delete `token.json` and authorize again.
+
+## Run the API
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+Check:
+
+```text
+GET http://127.0.0.1:8000/gmail/status
+```
+
+Expected shape:
+
+```json
+{
+  "credentials_present": true,
+  "token_present": true,
+  "connected": true,
+  "email_address": "you@example.com"
+}
+```
+
+## Safe first test
+
+From another account, send the connected Gmail account a new unread test message about an internship. Do not use a real recruiter thread for the first run.
+
+Inspect it:
+
+```text
+GET http://127.0.0.1:8000/gmail/messages/latest
+```
+
+Dry-run the workflow:
+
+```powershell
+$body = @{ dry_run = $true } | ConvertTo-Json
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:8000/workflows/internship-inquiry/run" `
   -ContentType "application/json" `
   -Body $body
 ```
 
-### Event Ledger smoke test
+A qualifying message should produce `decision: DRY_RUN` plus a proposed reply. Nothing is sent in dry-run mode.
 
-```powershell
-$event = @{
-  source = "phase0"
-  event_type = "SMOKE_TEST"
-  entity_id = "project:jiraya"
-  correlation_id = "phase0-001"
-  payload = @{ status = "ok" }
-} | ConvertTo-Json -Depth 10
+After reviewing the preview, you can explicitly enable external actions in `.env`:
 
-Invoke-RestMethod -Method Post `
-  -Uri "http://127.0.0.1:8000/events" `
-  -ContentType "application/json" `
-  -Body $event
-
-Invoke-RestMethod "http://127.0.0.1:8000/events"
+```env
+ENABLE_EXTERNAL_ACTIONS=true
 ```
 
-## Next phase
-
-Phase 1 will implement the first real vertical slice:
+Restart Uvicorn, then run with `dry_run=false` against your test message. A successful end-to-end result should return:
 
 ```text
-Incoming Gmail message
-  -> Nemotron classification
-  -> Agent sends approved reply
-  -> Verifier independently checks Gmail
-  -> Event Ledger records action + evidence
+decision            : SENT
+verification_status : VERIFIED_SUCCESS
 ```
 
-Temporal reconciliation comes only after that path is reliable.
+The Verifier does not ask another LLM whether the action worked. It independently queries Gmail for the sent-message ID and checks source-of-record facts: `SENT` label, thread ID, and recipient.
 
-## Security
+Use the returned `correlation_id` to inspect the evidence chain:
 
-Never commit `.env`, Gmail OAuth credentials, or tokens. Phase 0 keeps `ENABLE_EXTERNAL_ACTIONS=false`.
+```text
+GET /events?correlation_id=<correlation_id>
+```
+
+Expected sequence:
+
+```text
+EMAIL_OBSERVED
+EMAIL_CLASSIFIED
+EMAIL_REPLY_PROPOSED
+EMAIL_REPLY_SENT
+EMAIL_REPLY_VERIFIED
+```
+
+## Tests
+
+```powershell
+python -m pytest
+```
+
+Phase 1 adds tests for structured email classification, deterministic Gmail verification, and the no-send dry-run safety policy. These tests do not require a live Gmail account.
+
+## Phase 1 acceptance criteria
+
+- Existing Phase 0 health and Nemotron checks still work
+- `/gmail/status` reports `connected: true`
+- `/gmail/messages/latest` reads the test message
+- Dry run classifies the test email and proposes the approved reply
+- Dry run never sends mail
+- Real sending remains blocked while `ENABLE_EXTERNAL_ACTIONS=false`
+- With explicit enablement, a test reply sends
+- Verifier returns `VERIFIED_SUCCESS`
+- Event Ledger contains the complete evidence chain
+- `python -m pytest` passes
+
+## Intentionally deferred
+
+- Always-on Gmail Pub/Sub watcher
+- Temporal reconciliation of later replies/bounces
+- Calendar/GitHub connectors
+- Free-form autonomous email replies
+- LangSmith tracing
+
+Those come after this vertical slice is reliable.

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
 
     nebius_api_key: str = Field(default="")
-    nebius_base_url: str = "https://api.tokenfactory.nebius.com/"
+    nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1/"
     nebius_model: str = "nvidia/Nemotron-3_5-Lightning"
     nebius_timeout_seconds: float = 60.0
 

@@ -35,6 +35,9 @@ where = ["."]
 include = ["app*"]
 exclude = ["tests*", "JIRAYA*", "venv*", "env*"]
 
+[tool.setuptools.package-data]
+app = ["templates/*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

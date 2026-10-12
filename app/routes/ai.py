@@ -12,7 +12,7 @@ def smoke(request: SmokeRequest) -> SmokeResponse:
     settings = get_settings()
     try:
         provider = NebiusProvider(settings)
-        content = provider.complete(request.message)
+        content = provider.complete(request.message, enable_thinking=False)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:

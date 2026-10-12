@@ -1,5 +1,8 @@
 .env
 .venv/
+venv/
+env/
+JIRAYA/
 __pycache__/
 *.py[cod]
 .pytest_cache/

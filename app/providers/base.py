@@ -13,5 +13,5 @@ class ModelProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def complete(self, message: str) -> str:
+    def complete(self, message: str, *, enable_thinking: bool = True) -> str:
         raise NotImplementedError

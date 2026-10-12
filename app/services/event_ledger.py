@@ -1,5 +1,6 @@
-from typing import Any
+from typing import Any, Iterable
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Event
@@ -35,3 +36,16 @@ class EventLedger:
         self.db.commit()
         self.db.refresh(event)
         return event
+
+    def has_event(self, *, entity_id: str, event_types: Iterable[str]) -> bool:
+        """Return whether this entity already has any of the supplied ledger events."""
+        event_types = tuple(event_types)
+        if not event_types:
+            return False
+
+        statement = (
+            select(Event.id)
+            .where(Event.entity_id == entity_id, Event.event_type.in_(event_types))
+            .limit(1)
+        )
+        return self.db.execute(statement).scalar_one_or_none() is not None

@@ -54,7 +54,7 @@ Return ONLY one JSON object with exactly these fields:
 
 Rules:
 - NEW_OBLIGATION: the old action remains valid, but the later message introduces a new request, task, question, deadline, interview step, or commitment.
-- SUPERSEDED_LATER: the old action succeeded, but a later authoritative message replaces a previously relevant detail or state, such as changing Wednesday to Friday.
+- SUPERSEDED_LATER: the old action succeeded, but a later authoritative message replaces a previously relevant detail or state, such as changing Wednesday to Friday. Use the previous reconciliation context when present.
 - EXTERNALLY_INVALIDATED: the old action succeeded when executed, but a later external event makes its intended outcome invalid or unusable.
 - NO_MATERIAL_CHANGE: the newer message is acknowledgement, thanks, informational only, or otherwise creates no new obligation and does not replace/invalidate prior state.
 - Never rewrite history. A verified action must not be reclassified as an execution failure merely because the world changed afterward.
@@ -65,6 +65,7 @@ initial_status={action.initial_status}
 current_status={action.current_status}
 thread_id={action.external_thread_id}
 context={json.dumps(action.context, ensure_ascii=False)}
+previous_reconciliation={json.dumps(action.last_reconciliation or {}, ensure_ascii=False)}
 
 Later message:
 from={later_message.sender}

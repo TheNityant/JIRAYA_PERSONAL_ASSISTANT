@@ -37,6 +37,16 @@ class GmailClient:
         messages = [self.get_message(message_id) for message_id in ids]
         return max(messages, key=lambda item: item.internal_date_ms)
 
+    def get_thread_messages(self, thread_id: str) -> list[GmailMessage]:
+        raw_thread = (
+            self.service.users()
+            .threads()
+            .get(userId="me", id=thread_id, format="full")
+            .execute()
+        )
+        messages = [self._parse_message(raw) for raw in raw_thread.get("messages", [])]
+        return sorted(messages, key=lambda item: item.internal_date_ms)
+
     def get_message(self, message_id: str) -> GmailMessage:
         raw = (
             self.service.users()
@@ -44,6 +54,9 @@ class GmailClient:
             .get(userId="me", id=message_id, format="full")
             .execute()
         )
+        return self._parse_message(raw)
+
+    def _parse_message(self, raw: dict[str, Any]) -> GmailMessage:
         payload = raw.get("payload", {})
         headers = {
             header.get("name", "").lower(): header.get("value", "")

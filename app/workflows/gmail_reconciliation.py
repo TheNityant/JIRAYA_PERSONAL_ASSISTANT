@@ -80,20 +80,22 @@ class GmailReconciliationWorkflow:
                 "last_reconciliation": previous,
             }
 
+        observed_payload = {
+            "action_id": action.id,
+            "original_correlation_id": action.correlation_id,
+            "thread_id": action.external_thread_id,
+            "message_id": latest.id,
+            "from": latest.sender,
+            "subject": latest.subject,
+            "internal_date_ms": latest.internal_date_ms,
+            "body_preview": latest.body[:2000],
+        }
         self.ledger.append(
             source="gmail",
             event_type="EMAIL_LATER_EVENT_OBSERVED",
             entity_id=action.source_entity_id,
             correlation_id=reconciliation_id,
-            payload={
-                "action_id": action.id,
-                "original_correlation_id": action.correlation_id,
-                "thread_id": action.external_thread_id,
-                "message_id": latest.id,
-                "from": latest.sender,
-                "subject": latest.subject,
-                "internal_date_ms": latest.internal_date_ms,
-            },
+            payload=observed_payload,
         )
 
         decision = self.reconciler.reconcile(action=action, later_message=latest)
@@ -103,6 +105,7 @@ class GmailReconciliationWorkflow:
             "message_id": latest.id,
             "sender": latest.sender,
             "subject": latest.subject,
+            "body_preview": latest.body[:2000],
             "internal_date_ms": latest.internal_date_ms,
         }
         action = self.actions.apply_reconciliation(

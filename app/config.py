@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://jiraya:jiraya_dev_password@localhost:5432/jiraya"
     enable_external_actions: bool = False
 
+    gmail_credentials_path: str = "credentials.json"
+    gmail_token_path: str = "token.json"
+    gmail_classification_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    gmail_reply_template_path: str = "app/templates/internship_reply.txt"
+    gmail_reply_signature: str = "Nityant"
+
 
 @lru_cache
 def get_settings() -> Settings:

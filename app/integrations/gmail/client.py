@@ -3,7 +3,6 @@ import html
 import re
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
-from pathlib import Path
 from typing import Any
 
 from googleapiclient.discovery import build
@@ -56,11 +55,12 @@ class GmailClient:
         if not body:
             body = raw.get("snippet", "")
 
+        display_name = sender_name or (sender_email.split("@")[0] if sender_email else "there")
         return GmailMessage(
             id=raw["id"],
             thread_id=raw.get("threadId", ""),
             sender=sender_email or headers.get("from", ""),
-            sender_name=sender_name or sender_email.split("@")[0] if sender_email else "there",
+            sender_name=display_name,
             reply_to=reply_to_email or None,
             to=headers.get("to", ""),
             subject=headers.get("subject", "(no subject)"),

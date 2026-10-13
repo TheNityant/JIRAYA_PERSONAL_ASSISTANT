@@ -90,6 +90,7 @@ class ObligationStore:
         *,
         obligation: Obligation,
         message_id: str,
+        internal_date_ms: int,
         resolves: bool,
         confidence: float,
         reason: str,
@@ -97,6 +98,7 @@ class ObligationStore:
         obligation.context = {
             **(obligation.context or {}),
             "last_resolution_candidate_id": message_id,
+            "last_resolution_candidate_internal_date_ms": internal_date_ms,
             "last_resolution_candidate": {
                 "resolves": resolves,
                 "confidence": confidence,

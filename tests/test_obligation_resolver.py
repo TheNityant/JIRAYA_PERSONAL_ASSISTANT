@@ -9,6 +9,8 @@ from app.reconciler.obligation_resolver import ObligationResolver
 class FakeProvider(ModelProvider):
     def __init__(self, response: str):
         self.response = response
+        self.last_message = ""
+        self.calls = 0
 
     @property
     def provider_name(self) -> str:
@@ -19,6 +21,8 @@ class FakeProvider(ModelProvider):
         return "fake-model"
 
     def complete(self, message: str, *, enable_thinking: bool = True) -> str:
+        self.calls += 1
+        self.last_message = message
         return self.response
 
 
@@ -82,3 +86,42 @@ def test_acknowledgement_does_not_resolve_obligation():
         sent_message=sent_message("Thanks, I will get back to you shortly."),
     )
     assert decision.resolves is False
+
+
+def test_quoted_history_is_removed_before_model_evaluation():
+    provider = FakeProvider(
+        '{"resolves":true,"confidence":0.99,'
+        '"reason":"The newly authored text provides Friday at 1 PM."}'
+    )
+    body = (
+        "Wednesday does not work for me. Friday at 1 PM works well.\n\n"
+        "On Tue, Oct 13, 2026 at 9:00 AM Recruiter <recruiter@example.com> wrote:\n"
+        "> Would you be available for an interview on Wednesday at 3 PM?\n"
+    )
+
+    decision = ObligationResolver(provider).evaluate(
+        obligation=obligation(),
+        sent_message=sent_message(body),
+    )
+
+    assert decision.resolves is True
+    assert "Friday at 1 PM works well" in provider.last_message
+    assert "Would you be available for an interview on Wednesday at 3 PM?" not in provider.last_message
+
+
+def test_quote_only_sent_message_cannot_resolve_obligation():
+    provider = FakeProvider(
+        '{"resolves":true,"confidence":1.0,"reason":"should never be called"}'
+    )
+    body = (
+        "On Tue, Oct 13, 2026 at 9:00 AM Recruiter <recruiter@example.com> wrote:\n"
+        "> Would you be available for an interview on Wednesday at 3 PM?\n"
+    )
+
+    decision = ObligationResolver(provider).evaluate(
+        obligation=obligation(),
+        sent_message=sent_message(body),
+    )
+
+    assert decision.resolves is False
+    assert provider.calls == 0

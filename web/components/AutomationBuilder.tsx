@@ -74,7 +74,7 @@ export default function AutomationBuilder() {
   const [status, setStatus] = useState("Loading workspace...");
   const [preview, setPreview] = useState<any>(null);
   const [connections, setConnections] = useState<ConnectionCatalogItem[]>([]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>(buildNodes(emptyAutomation));
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(buildNodes(emptyAutomation));
 
   async function refresh(preferredId?: string) {
     const list = await api.listAutomations();

@@ -90,3 +90,44 @@ def test_obligation_can_be_resolved_by_user():
         assert resolved.status == "RESOLVED_BY_USER"
         assert resolved.resolution["message_id"] == "manual-sent-1"
         assert store.open_for_action(action.id) is None
+
+
+def test_replay_does_not_reopen_resolved_trigger():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        action = make_action()
+        db.add(action)
+        db.commit()
+        store = ObligationStore(db)
+
+        obligation = store.upsert_from_reconciliation(
+            action=action,
+            classification="NEW_OBLIGATION",
+            reason="Reply with availability",
+            message_id="incoming-1",
+            message_internal_date_ms=1000,
+            evidence={"message_id": "incoming-1"},
+        )
+        resolved = store.resolve(
+            obligation=obligation,
+            status="RESOLVED_BY_USER",
+            resolved_at=datetime.now(timezone.utc),
+            message_id="manual-sent-1",
+            reason="User replied manually",
+            evidence={"message_id": "manual-sent-1"},
+        )
+
+        replayed = store.upsert_from_reconciliation(
+            action=action,
+            classification="NEW_OBLIGATION",
+            reason="Reply with availability",
+            message_id="incoming-1",
+            message_internal_date_ms=1000,
+            evidence={"message_id": "incoming-1"},
+        )
+
+        assert replayed.id == resolved.id
+        assert replayed.status == "RESOLVED_BY_USER"
+        assert store.open_for_action(action.id) is None

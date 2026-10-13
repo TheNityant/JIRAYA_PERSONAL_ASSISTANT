@@ -11,14 +11,20 @@ from app.services.connection_store import ConnectionStore
 
 
 def get_gmail_client(db: Session, settings: Settings) -> GmailClient:
-    """Prefer a database-backed Google connection, then fall back to local token.json.
+    """Resolve Gmail credentials for the current development user.
 
-    The fallback keeps the existing developer workflow working while Phase 2D migrates
-    Gmail to the same connection system real users will use through the frontend.
+    Before Web OAuth is configured, the old local token.json remains a development
+    fallback. Once GOOGLE_OAUTH_CLIENT_ID/SECRET are present, the database connection
+    becomes authoritative so Disconnect really disconnects Gmail.
     """
     store = ConnectionStore(db)
     connection = store.get_active(user_id=settings.dev_user_id, provider="google")
     if connection is None:
+        web_oauth_configured = bool(
+            settings.google_oauth_client_id and settings.google_oauth_client_secret
+        )
+        if web_oauth_configured:
+            raise RuntimeError("Gmail is not connected. Use Connect Gmail in the Jiraya frontend.")
         return GmailClient(settings)
 
     cipher = TokenCipher(settings.token_encryption_key)

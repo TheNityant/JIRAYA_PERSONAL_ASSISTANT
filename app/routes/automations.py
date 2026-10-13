@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.automation.matcher import AutomationMatcher
 from app.config import get_settings
 from app.db import get_db
-from app.integrations.gmail.client import GmailClient
+from app.integrations.gmail.connection import get_gmail_client
 from app.models import Automation
 from app.providers.nebius import NebiusProvider
 from app.services.automation_store import AutomationStore
@@ -99,8 +99,7 @@ def list_automations(
 
 @router.post("/automations", status_code=201)
 def create_automation(request: AutomationCreate, db: Session = Depends(get_db)) -> dict:
-    store = AutomationStore(db)
-    automation = store.create(**request.model_dump())
+    automation = AutomationStore(db).create(**request.model_dump())
     return _payload(automation)
 
 
@@ -114,8 +113,7 @@ def update_automation(
     automation = store.get(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
-    values = request.model_dump(exclude_unset=True)
-    return _payload(store.update(automation, values))
+    return _payload(store.update(automation, request.model_dump(exclude_unset=True)))
 
 
 @router.delete("/automations/{automation_id}", status_code=204)
@@ -146,9 +144,7 @@ def create_internship_preset(db: Session = Depends(get_db)) -> dict:
             "body_contains": "",
         },
         context_config={
-            "instructions": (
-                "Use my stated availability and preferences when relevant. Do not invent facts."
-            )
+            "instructions": "Use my stated availability and preferences when relevant. Do not invent facts."
         },
         action_config={
             "type": "DRAFT_REPLY",
@@ -174,8 +170,12 @@ def preview_gmail_match(
         raise HTTPException(status_code=400, detail="Automation source is not Gmail")
 
     try:
-        gmail = GmailClient(settings)
-        message = gmail.get_message(request.message_id) if request.message_id else gmail.get_latest_unread_inbox()
+        gmail = get_gmail_client(db, settings)
+        message = (
+            gmail.get_message(request.message_id)
+            if request.message_id
+            else gmail.get_latest_unread_inbox()
+        )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Gmail unavailable: {type(exc).__name__}") from exc
 

@@ -17,5 +17,5 @@ def test_root():
         response = client.get("/")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["phase"] == "phase-2c"
-    assert payload["version"] == "0.4.0"
+    assert payload["phase"] == "phase-2d"
+    assert payload["version"] == "0.5.0"

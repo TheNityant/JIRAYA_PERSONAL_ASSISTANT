@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, JSON, String
+from sqlalchemy import Boolean, DateTime, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -74,12 +74,7 @@ class Obligation(Base):
 
 
 class Automation(Base):
-    """User-owned workflow definition executed by Jiraya's generic automation runtime.
-
-    Configuration lives as structured JSON so the UI can evolve without adding a new
-    Python workflow file for every user intent. The runtime still validates supported
-    sources, triggers, actions, and policies before execution.
-    """
+    """User-owned workflow definition executed by Jiraya's generic automation runtime."""
 
     __tablename__ = "automations"
 
@@ -100,3 +95,64 @@ class Automation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class User(Base):
+    """Jiraya account identity.
+
+    Phase 2D seeds one local development user; production sign-in will select this
+    record from the authenticated session instead of from Settings.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="Local user")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class Connection(Base):
+    """An external account authorized by a Jiraya user.
+
+    credential_ciphertext contains encrypted provider OAuth credentials. Public account
+    metadata and granted scopes remain queryable without decrypting the token payload.
+    """
+
+    __tablename__ = "connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", "provider_account_id", name="uq_user_provider_account"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    provider_account_id: Mapped[str] = mapped_column(String(320), index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(40), default="CONNECTED", index=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    credential_ciphertext: Mapped[str] = mapped_column(Text)
+    connection_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class OAuthState(Base):
+    """Short-lived OAuth CSRF state persisted across browser redirects."""
+
+    __tablename__ = "oauth_states"
+
+    state: Mapped[str] = mapped_column(String(160), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(80), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

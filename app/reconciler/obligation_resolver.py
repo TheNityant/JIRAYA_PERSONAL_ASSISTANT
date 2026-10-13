@@ -3,6 +3,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from app.integrations.gmail.content import extract_authored_text
 from app.integrations.gmail.models import GmailMessage
 from app.models import Obligation
 from app.providers.base import ModelProvider
@@ -15,13 +16,7 @@ class ObligationResolutionDecision(BaseModel):
 
 
 class ObligationResolver:
-    """Judge whether a later sent message actually satisfies an open obligation.
-
-    Email replies commonly contain the entire previous conversation below the user's
-    newly authored text. The resolver must never treat that quoted history as a new
-    user action, otherwise an old recruiter question can accidentally satisfy its own
-    obligation.
-    """
+    """Judge whether a later sent message actually satisfies an open obligation."""
 
     def __init__(self, provider: ModelProvider):
         self.provider = provider
@@ -32,7 +27,7 @@ class ObligationResolver:
         obligation: Obligation,
         sent_message: GmailMessage,
     ) -> ObligationResolutionDecision:
-        authored_body = self.extract_authored_text(sent_message.body)
+        authored_body = extract_authored_text(sent_message.body)
         if not authored_body:
             return ObligationResolutionDecision(
                 resolves=False,
@@ -73,64 +68,6 @@ newly_authored_body={authored_body[:8000]}
 """.strip()
         raw = self.provider.complete(prompt, enable_thinking=False)
         return ObligationResolutionDecision.model_validate(self._extract_json(raw))
-
-    @staticmethod
-    def extract_authored_text(body: str) -> str:
-        """Return top-posted user text while excluding quoted email history.
-
-        The separator in Gmail replies can wrap across lines, so quoted-history removal
-        starts with a multiline pass and then applies conservative line-based fallbacks.
-        """
-        if not body:
-            return ""
-
-        text = body.replace("\r\n", "\n").replace("\r", "\n").strip()
-        if not text:
-            return ""
-
-        # Gmail/plain-text reply header. DOTALL handles a header that wraps before
-        # the sender address or the final "wrote:" token.
-        gmail_quote = re.search(
-            r"(?:^|\n)On\s.+?\bwrote:\s*(?:\n|$)",
-            text,
-            flags=re.IGNORECASE | re.DOTALL,
-        )
-        if gmail_quote:
-            text = text[: gmail_quote.start()].strip()
-
-        # Outlook/enterprise-style separators.
-        original_message = re.search(
-            r"(?:^|\n)-{2,}\s*Original Message\s*-{2,}(?:\n|$)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if original_message:
-            text = text[: original_message.start()].strip()
-
-        if not text:
-            return ""
-
-        kept: list[str] = []
-        for line in text.split("\n"):
-            stripped = line.strip()
-            if re.match(r"^_{5,}$", stripped):
-                break
-            if stripped.startswith(">"):
-                break
-            kept.append(line)
-
-        authored = "\n".join(kept).strip()
-
-        # Some clients begin the quoted block directly with mail headers.
-        header_block = re.search(
-            r"(?:^|\n)(?:From|Sent|To|Subject):\s.+(?:\n|$)",
-            authored,
-            flags=re.IGNORECASE,
-        )
-        if header_block:
-            authored = authored[: header_block.start()].strip()
-
-        return authored
 
     @staticmethod
     def _extract_json(raw: str) -> dict:

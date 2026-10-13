@@ -60,10 +60,19 @@ class GmailReconciliationWorkflow:
                 reason=f"Gmail thread could not be observed: {type(exc).__name__}",
             )
 
+        # A Phase-2A reconciliation may already have returned requires_follow_up=True
+        # before the obligations table existed. Materialize that state once so an
+        # existing live demo can continue into Phase 2B without repeating the email.
+        open_obligation = self.obligations.open_for_action(action.id)
+        if open_obligation is None:
+            open_obligation = self._backfill_obligation_if_needed(
+                reconciliation_id=reconciliation_id,
+                action=action,
+            )
+
         # Phase 2B: an obligation can be closed by a later SENT message in the same
         # thread. If the SENT message maps to another Jiraya action, the agent resolved
         # it. Otherwise Gmail is evidence that the user handled it manually.
-        open_obligation = self.obligations.open_for_action(action.id)
         if open_obligation:
             resolution_message = self._latest_sent_after_obligation(open_obligation, thread_messages)
             if resolution_message:
@@ -194,6 +203,42 @@ class GmailReconciliationWorkflow:
             "later_message": evidence,
             "obligation": self._obligation_payload(obligation),
         }
+
+    def _backfill_obligation_if_needed(
+        self,
+        *,
+        reconciliation_id: str,
+        action: Action,
+    ) -> Obligation | None:
+        previous = action.last_reconciliation or {}
+        if not previous.get("requires_follow_up") or not previous.get("message_id"):
+            return None
+        evidence = previous.get("evidence") or {}
+        internal_date_ms = int(evidence.get("internal_date_ms") or 0)
+        if internal_date_ms <= 0:
+            return None
+
+        obligation = self.obligations.upsert_from_reconciliation(
+            action=action,
+            classification=previous.get("classification") or "NEW_OBLIGATION",
+            reason=previous.get("reason") or "A prior reconciliation requires follow-up.",
+            message_id=previous["message_id"],
+            message_internal_date_ms=internal_date_ms,
+            evidence=evidence,
+        )
+        self.ledger.append(
+            source="reconciliator",
+            event_type="OBLIGATION_BACKFILLED",
+            entity_id=action.source_entity_id,
+            correlation_id=reconciliation_id,
+            payload={
+                "obligation_id": obligation.id,
+                "action_id": action.id,
+                "trigger_message_id": obligation.trigger_message_id,
+                "status": obligation.status,
+            },
+        )
+        return obligation
 
     def _resolve_obligation_from_sent_message(
         self,

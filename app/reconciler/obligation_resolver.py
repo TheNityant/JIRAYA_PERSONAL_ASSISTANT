@@ -76,11 +76,10 @@ newly_authored_body={authored_body[:8000]}
 
     @staticmethod
     def extract_authored_text(body: str) -> str:
-        """Return the top-posted text authored in this reply, excluding quoted history.
+        """Return top-posted user text while excluding quoted email history.
 
-        Handles common Gmail/Outlook/plain-text reply separators. This is intentionally
-        conservative: when the body appears to contain only quoted history, return an
-        empty string rather than allowing stale text to satisfy an obligation.
+        The separator in Gmail replies can wrap across lines, so quoted-history removal
+        starts with a multiline pass and then applies conservative line-based fallbacks.
         """
         if not body:
             return ""
@@ -89,34 +88,42 @@ newly_authored_body={authored_body[:8000]}
         if not text:
             return ""
 
-        lines = text.split("\n")
+        # Gmail/plain-text reply header. DOTALL handles a header that wraps before
+        # the sender address or the final "wrote:" token.
+        gmail_quote = re.search(
+            r"(?:^|\n)On\s.+?\bwrote:\s*(?:\n|$)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if gmail_quote:
+            text = text[: gmail_quote.start()].strip()
+
+        # Outlook/enterprise-style separators.
+        original_message = re.search(
+            r"(?:^|\n)-{2,}\s*Original Message\s*-{2,}(?:\n|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if original_message:
+            text = text[: original_message.start()].strip()
+
+        if not text:
+            return ""
+
         kept: list[str] = []
-
-        for line in lines:
+        for line in text.split("\n"):
             stripped = line.strip()
-
-            # Gmail/plain-text replies: "On Mon, ... wrote:"
-            if re.match(r"^On\s.+\bwrote:\s*$", stripped, flags=re.IGNORECASE):
-                break
-
-            # Outlook and many enterprise mail clients.
-            if re.match(r"^-{2,}\s*Original Message\s*-{2,}$", stripped, flags=re.IGNORECASE):
-                break
             if re.match(r"^_{5,}$", stripped):
                 break
-
-            # If quoting starts, everything below normally belongs to prior history.
             if stripped.startswith(">"):
                 break
-
             kept.append(line)
 
         authored = "\n".join(kept).strip()
 
-        # Some clients begin the quoted block with From:/Sent:/To:/Subject: instead of a
-        # visible separator. Cut only when those headers appear after authored content.
+        # Some clients begin the quoted block directly with mail headers.
         header_block = re.search(
-            r"\n(?:From|Sent|To|Subject):\s.+(?:\n|$)",
+            r"(?:^|\n)(?:From|Sent|To|Subject):\s.+(?:\n|$)",
             authored,
             flags=re.IGNORECASE,
         )

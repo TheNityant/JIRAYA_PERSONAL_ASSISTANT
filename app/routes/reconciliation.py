@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -7,9 +7,10 @@ from app.db import get_db
 from app.integrations.gmail.client import GmailClient
 from app.providers.nebius import NebiusProvider
 from app.services.action_store import ActionStore
+from app.services.obligation_store import ObligationStore
 from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
 
-router = APIRouter(tags=["actions", "reconciliation"])
+router = APIRouter(tags=["actions", "obligations", "reconciliation"])
 
 
 class GmailReconciliationRequest(BaseModel):
@@ -37,6 +38,34 @@ def list_actions(db: Session = Depends(get_db)) -> list[dict]:
             "last_reconciled_at": action.last_reconciled_at,
         }
         for action in actions
+    ]
+
+
+@router.get("/obligations")
+def list_obligations(
+    status: str | None = Query(default=None, description="Optional obligation status, e.g. OPEN"),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    obligations = ObligationStore(db).list_recent(status=status)
+    return [
+        {
+            "id": obligation.id,
+            "obligation_type": obligation.obligation_type,
+            "source": obligation.source,
+            "source_entity_id": obligation.source_entity_id,
+            "related_action_id": obligation.related_action_id,
+            "external_thread_id": obligation.external_thread_id,
+            "trigger_message_id": obligation.trigger_message_id,
+            "status": obligation.status,
+            "title": obligation.title,
+            "description": obligation.description,
+            "context": obligation.context,
+            "resolution": obligation.resolution,
+            "created_at": obligation.created_at,
+            "updated_at": obligation.updated_at,
+            "resolved_at": obligation.resolved_at,
+        }
+        for obligation in obligations
     ]
 
 

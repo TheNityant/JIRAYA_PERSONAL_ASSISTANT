@@ -15,11 +15,7 @@ settings = get_settings()
 
 engine_kwargs: dict = {"pool_pre_ping": True}
 if settings.database_url.startswith("sqlite") and ":memory:" in settings.database_url:
-    # An in-memory SQLite database normally belongs to one connection. FastAPI's
-    # TestClient can create tables during lifespan on one connection and service the
-    # request on another, which makes the second connection look like an empty database.
-    # StaticPool keeps one shared connection for the whole test process, and
-    # check_same_thread=False allows TestClient worker threads to use it safely.
+    # Share one in-memory SQLite connection across FastAPI TestClient threads.
     engine_kwargs.update(
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
@@ -38,6 +34,14 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import Action, Automation, Event, Obligation  # noqa: F401
+    from app.models import (  # noqa: F401
+        Action,
+        Automation,
+        Connection,
+        Event,
+        OAuthState,
+        Obligation,
+        User,
+    )
 
     Base.metadata.create_all(bind=engine)

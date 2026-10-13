@@ -72,10 +72,10 @@ class GmailReconciliationWorkflow:
                 action=action,
             )
 
-        # A later SENT message is only a resolution candidate. Jiraya must still decide
-        # whether its contents actually satisfy the open obligation; a simple "thanks"
-        # should not clear an interview-availability request.
-        if open_obligation:
+        # A later SENT message is only a resolution candidate. A replay may recover a
+        # terminal obligation for the same trigger; terminal obligations are historical
+        # evidence and must never be evaluated or resolved a second time.
+        if open_obligation and open_obligation.status == "OPEN":
             resolution_message = self._latest_sent_after_obligation(open_obligation, thread_messages)
             if resolution_message:
                 return self._evaluate_sent_resolution_candidate(
@@ -168,7 +168,7 @@ class GmailReconciliationWorkflow:
 
         obligation = open_obligation
         if decision.requires_follow_up:
-            existed = open_obligation is not None
+            existed = open_obligation is not None and open_obligation.status == "OPEN"
             obligation = self.obligations.upsert_from_reconciliation(
                 action=action,
                 classification=decision.classification,
@@ -228,18 +228,22 @@ class GmailReconciliationWorkflow:
             message_internal_date_ms=internal_date_ms,
             evidence=evidence,
         )
-        self.ledger.append(
-            source="reconciliator",
-            event_type="OBLIGATION_BACKFILLED",
-            entity_id=action.source_entity_id,
-            correlation_id=reconciliation_id,
-            payload={
-                "obligation_id": obligation.id,
-                "action_id": action.id,
-                "trigger_message_id": obligation.trigger_message_id,
-                "status": obligation.status,
-            },
-        )
+        # Only record a backfill event for a genuinely open reconstructed obligation.
+        # If the same trigger already has a terminal obligation, returning it lets the
+        # caller expose the historical resolution without reopening or re-resolving it.
+        if obligation.status == "OPEN":
+            self.ledger.append(
+                source="reconciliator",
+                event_type="OBLIGATION_BACKFILLED",
+                entity_id=action.source_entity_id,
+                correlation_id=reconciliation_id,
+                payload={
+                    "obligation_id": obligation.id,
+                    "action_id": action.id,
+                    "trigger_message_id": obligation.trigger_message_id,
+                    "status": obligation.status,
+                },
+            )
         return obligation
 
     def _evaluate_sent_resolution_candidate(

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
+    frontend_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     nebius_api_key: str = Field(default="")
     nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1/"

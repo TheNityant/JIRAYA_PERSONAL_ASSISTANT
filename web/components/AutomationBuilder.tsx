@@ -7,10 +7,12 @@ import {
   Edge,
   MarkerType,
   Node,
+  Position,
   ReactFlow,
+  useNodesState,
 } from "@xyflow/react";
 
-import { api, Automation, AutomationInput } from "@/lib/api";
+import { api, Automation, AutomationInput, ConnectionCatalogItem } from "@/lib/api";
 
 const emptyAutomation: AutomationInput = {
   name: "New automation",
@@ -34,12 +36,45 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function buildNodes(draft: AutomationInput): Node[] {
+  const semantic = str(draft.match_config.semantic_condition) || "Any configured match";
+  const action = str(draft.action_config.type) || "DRAFT_REPLY";
+  const items = [
+    ["trigger", "Trigger", "Gmail · New email", 0, 120],
+    ["match", "Match", semantic, 250, 120],
+    ["context", "Context", str(draft.context_config.instructions) || "User context", 500, 120],
+    ["action", "Action", action.replaceAll("_", " "), 750, 120],
+    ["approval", "Approval", draft.approval_policy.replaceAll("_", " "), 1000, 120],
+    ["verify", "Verifier", "Prove the action happened", 350, 370],
+    ["reconcile", "Reconciliator", "Observe later world changes", 650, 370],
+    ["obligation", "Obligation", "Track remaining work", 950, 370],
+  ] as const;
+
+  return items.map(([id, title, detail, x, y]) => ({
+    id,
+    position: { x, y },
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+    data: {
+      label: (
+        <div className={`flow-node ${["verify", "reconcile", "obligation"].includes(id) ? "assurance-node" : ""}`}>
+          <span className="flow-node-kicker">{title}</span>
+          <strong>{detail}</strong>
+        </div>
+      ),
+    },
+    style: { width: 210 },
+  }));
+}
+
 export default function AutomationBuilder() {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [selected, setSelected] = useState<Automation | null>(null);
   const [draft, setDraft] = useState<AutomationInput>(emptyAutomation);
-  const [status, setStatus] = useState("Loading automations...");
+  const [status, setStatus] = useState("Loading workspace...");
   const [preview, setPreview] = useState<any>(null);
+  const [connections, setConnections] = useState<ConnectionCatalogItem[]>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>(buildNodes(emptyAutomation));
 
   async function refresh(preferredId?: string) {
     const list = await api.listAutomations();
@@ -49,9 +84,38 @@ export default function AutomationBuilder() {
     setStatus(list.length ? "Ready" : "Create your first automation");
   }
 
+  async function refreshConnections() {
+    const response = await api.listConnections();
+    setConnections(response.catalog);
+  }
+
   useEffect(() => {
-    refresh().catch((error) => setStatus(`Backend unavailable: ${error.message}`));
+    Promise.all([refresh(), refreshConnections()]).catch((error) =>
+      setStatus(`Backend unavailable: ${error.message}`),
+    );
+
+    const query = new URLSearchParams(window.location.search);
+    const connectionStatus = query.get("status");
+    const provider = query.get("connection");
+    if (provider && connectionStatus) {
+      setStatus(
+        connectionStatus === "connected"
+          ? `${provider} connected successfully`
+          : `${provider} connection failed: ${query.get("detail") ?? "unknown error"}`,
+      );
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
+
+  useEffect(() => {
+    const fresh = buildNodes(draft);
+    setNodes((current) =>
+      current.map((node) => {
+        const replacement = fresh.find((item) => item.id === node.id);
+        return replacement ? { ...node, data: replacement.data, style: replacement.style } : node;
+      }),
+    );
+  }, [draft, setNodes]);
 
   function selectAutomation(item: Automation | null) {
     setSelected(item);
@@ -73,40 +137,21 @@ export default function AutomationBuilder() {
     });
   }
 
-  const nodes = useMemo<Node[]>(() => {
-    const semantic = str(draft.match_config.semantic_condition) || "Any configured match";
-    const action = str(draft.action_config.type) || "DRAFT_REPLY";
-    const items = [
-      ["trigger", "Trigger", "Gmail · New email", 0],
-      ["match", "Match", semantic, 190],
-      ["context", "Context", str(draft.context_config.instructions) || "User context", 380],
-      ["action", "Action", action.replaceAll("_", " "), 570],
-      ["approval", "Approval", draft.approval_policy.replaceAll("_", " "), 760],
-      ["verify", "Verifier", "Prove the action happened", 950],
-      ["reconcile", "Reconciliator", "Observe later world changes", 1140],
-      ["obligation", "Obligation", "Track remaining work", 1330],
-    ] as const;
-    return items.map(([id, title, detail, x]) => ({
-      id,
-      position: { x, y: 180 },
-      data: {
-        label: (
-          <div className="flow-node">
-            <span className="flow-node-kicker">{title}</span>
-            <strong>{detail}</strong>
-          </div>
-        ),
-      },
-      style: { width: 166 },
-    }));
-  }, [draft]);
-
   const edges = useMemo<Edge[]>(() => {
-    const ids = ["trigger", "match", "context", "action", "approval", "verify", "reconcile", "obligation"];
-    return ids.slice(0, -1).map((id, index) => ({
-      id: `${id}-${ids[index + 1]}`,
-      source: id,
-      target: ids[index + 1],
+    const links = [
+      ["trigger", "match"],
+      ["match", "context"],
+      ["context", "action"],
+      ["action", "approval"],
+      ["approval", "verify"],
+      ["verify", "reconcile"],
+      ["reconcile", "obligation"],
+    ];
+    return links.map(([source, target]) => ({
+      id: `${source}-${target}`,
+      source,
+      target,
+      type: "smoothstep",
       markerEnd: { type: MarkerType.ArrowClosed },
     }));
   }, []);
@@ -175,6 +220,19 @@ export default function AutomationBuilder() {
     await refresh();
   }
 
+  function connect(item: ConnectionCatalogItem) {
+    if (item.id === "gmail") {
+      window.location.href = api.googleConnectUrl();
+    }
+  }
+
+  async function disconnectGoogle() {
+    setStatus("Disconnecting Google...");
+    await api.disconnectGoogle();
+    await refreshConnections();
+    setStatus("Google disconnected");
+  }
+
   return (
     <main className="workspace">
       <aside className="sidebar">
@@ -213,6 +271,27 @@ export default function AutomationBuilder() {
           )}
         </div>
 
+        <div className="sidebar-title-row connections-heading">
+          <span>Connections</span>
+        </div>
+        <div className="connection-list">
+          {connections.map((item) => (
+            <div className="connection-card" key={item.id}>
+              <div className="connection-copy">
+                <strong>{item.label}</strong>
+                <span>{item.account ?? item.description}</span>
+              </div>
+              {item.status === "CONNECTED" ? (
+                <button className="connection-action connected" onClick={disconnectGoogle}>Connected</button>
+              ) : item.status === "AVAILABLE" ? (
+                <button className="connection-action" onClick={() => connect(item)}>Connect</button>
+              ) : (
+                <span className="connection-coming">Soon</span>
+              )}
+            </div>
+          ))}
+        </div>
+
         <div className="sidebar-footer">
           <span className="small-label">Runtime</span>
           <strong>{status}</strong>
@@ -232,7 +311,17 @@ export default function AutomationBuilder() {
         </header>
 
         <div className="flow-area">
-          <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.45} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            nodesDraggable
+            fitView
+            fitViewOptions={{ padding: 0.18 }}
+            minZoom={0.45}
+            maxZoom={1.5}
+            proOptions={{ hideAttribution: true }}
+          >
             <Background gap={22} size={1} />
             <Controls showInteractive={false} />
           </ReactFlow>
@@ -257,8 +346,8 @@ export default function AutomationBuilder() {
       <aside className="inspector">
         <div className="inspector-heading">
           <span className="eyebrow">Configuration</span>
-          <h2>User-owned logic</h2>
-          <p>Nothing here is tied to the phrase “internship inquiry”. This definition is stored in PostgreSQL and interpreted at runtime.</p>
+          <h2>Automation logic</h2>
+          <p>Define what Jiraya should notice, what context it should use, and what action it may take.</p>
         </div>
 
         <label>

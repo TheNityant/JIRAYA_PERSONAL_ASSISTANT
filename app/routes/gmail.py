@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.integrations.gmail.client import GmailClient
+from app.integrations.gmail.connection import get_gmail_client
 from app.providers.nebius import NebiusProvider
+from app.services.connection_store import ConnectionStore
 from app.workflows.internship_inquiry import InternshipInquiryWorkflow
 
 router = APIRouter(tags=["gmail", "workflows"])
@@ -19,21 +20,22 @@ class InternshipWorkflowRequest(BaseModel):
 
 
 @router.get("/gmail/status")
-def gmail_status() -> dict:
+def gmail_status(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
-    credentials_present = Path(settings.gmail_credentials_path).exists()
-    token_present = Path(settings.gmail_token_path).exists()
+    connection = ConnectionStore(db).get_active(
+        user_id=settings.dev_user_id,
+        provider="google",
+    )
     response = {
-        "credentials_present": credentials_present,
-        "token_present": token_present,
         "connected": False,
-        "email_address": None,
+        "connection_mode": "database" if connection else "legacy-local",
+        "email_address": connection.provider_account_id if connection else None,
+        "credentials_present": Path(settings.gmail_credentials_path).exists(),
+        "token_present": Path(settings.gmail_token_path).exists(),
     }
-    if not token_present:
-        return response
 
     try:
-        client = GmailClient(settings)
+        client = get_gmail_client(db, settings)
         profile = client.get_profile()
         response["connected"] = True
         response["email_address"] = profile.get("emailAddress")
@@ -43,10 +45,10 @@ def gmail_status() -> dict:
 
 
 @router.get("/gmail/messages/latest")
-def latest_unread_message() -> dict:
+def latest_unread_message(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
     try:
-        message = GmailClient(settings).get_latest_unread_inbox()
+        message = get_gmail_client(db, settings).get_latest_unread_inbox()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Gmail unavailable: {type(exc).__name__}") from exc
     if message is None:
@@ -70,13 +72,11 @@ def run_internship_workflow(
 ) -> dict:
     settings = get_settings()
     try:
-        gmail = GmailClient(settings)
-        provider = NebiusProvider(settings)
         workflow = InternshipInquiryWorkflow(
             settings=settings,
             db=db,
-            provider=provider,
-            gmail=gmail,
+            provider=NebiusProvider(settings),
+            gmail=get_gmail_client(db, settings),
         )
         return workflow.run(message_id=request.message_id, dry_run=request.dry_run)
     except FileNotFoundError as exc:

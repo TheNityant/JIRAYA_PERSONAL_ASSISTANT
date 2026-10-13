@@ -7,6 +7,7 @@ from app.integrations.gmail.client import GmailClient
 from app.models import Action, Obligation
 from app.providers.base import ModelProvider
 from app.reconciler.email_reconciler import EmailReconciler
+from app.reconciler.obligation_resolver import ObligationResolver
 from app.services.action_store import ActionStore
 from app.services.event_ledger import EventLedger
 from app.services.obligation_store import ObligationStore
@@ -25,6 +26,7 @@ class GmailReconciliationWorkflow:
         self.ledger = EventLedger(db)
         self.gmail = gmail
         self.reconciler = EmailReconciler(provider)
+        self.obligation_resolver = ObligationResolver(provider)
 
     def run(self, *, action_id: str | None = None) -> dict:
         reconciliation_id = str(uuid4())
@@ -70,13 +72,13 @@ class GmailReconciliationWorkflow:
                 action=action,
             )
 
-        # Phase 2B: an obligation can be closed by a later SENT message in the same
-        # thread. If the SENT message maps to another Jiraya action, the agent resolved
-        # it. Otherwise Gmail is evidence that the user handled it manually.
+        # A later SENT message is only a resolution candidate. Jiraya must still decide
+        # whether its contents actually satisfy the open obligation; a simple "thanks"
+        # should not clear an interview-availability request.
         if open_obligation:
             resolution_message = self._latest_sent_after_obligation(open_obligation, thread_messages)
             if resolution_message:
-                return self._resolve_obligation_from_sent_message(
+                return self._evaluate_sent_resolution_candidate(
                     reconciliation_id=reconciliation_id,
                     action=action,
                     obligation=open_obligation,
@@ -240,7 +242,7 @@ class GmailReconciliationWorkflow:
         )
         return obligation
 
-    def _resolve_obligation_from_sent_message(
+    def _evaluate_sent_resolution_candidate(
         self,
         *,
         reconciliation_id: str,
@@ -248,30 +250,67 @@ class GmailReconciliationWorkflow:
         obligation: Obligation,
         message,
     ) -> dict:
-        resolving_action = self.actions.find_by_sent_message_id(message.id)
-        if resolving_action:
-            resolution_status = "RESOLVED_BY_AGENT"
-            event_type = "OBLIGATION_RESOLVED_BY_AGENT"
-            reason = "A later verified Jiraya action addressed the open obligation."
-        else:
-            resolution_status = "RESOLVED_BY_USER"
-            event_type = "OBLIGATION_RESOLVED_BY_USER"
-            reason = "A later user-sent Gmail message addressed the open obligation."
+        semantic = self.obligation_resolver.evaluate(
+            obligation=obligation,
+            sent_message=message,
+        )
+        obligation = self.obligations.note_resolution_candidate(
+            obligation=obligation,
+            message_id=message.id,
+            internal_date_ms=message.internal_date_ms,
+            resolves=semantic.resolves,
+            confidence=semantic.confidence,
+            reason=semantic.reason,
+        )
 
-        resolved_at = datetime.fromtimestamp(message.internal_date_ms / 1000, tz=timezone.utc)
         evidence = {
             "thread_id": message.thread_id,
             "message_id": message.id,
             "subject": message.subject,
             "body_preview": message.body[:2000],
             "internal_date_ms": message.internal_date_ms,
+            "semantic_resolution": semantic.model_dump(),
         }
+
+        if not semantic.resolves:
+            self.ledger.append(
+                source="reconciliator",
+                event_type="OBLIGATION_RESOLUTION_CANDIDATE_INSUFFICIENT",
+                entity_id=action.source_entity_id,
+                correlation_id=reconciliation_id,
+                payload={
+                    "obligation_id": obligation.id,
+                    "action_id": action.id,
+                    "candidate_message_id": message.id,
+                    **semantic.model_dump(),
+                },
+            )
+            return {
+                "correlation_id": reconciliation_id,
+                "action_id": action.id,
+                "decision": "OBLIGATION_STILL_OPEN",
+                "original_action_status": action.initial_status,
+                "current_status": action.current_status,
+                "obligation": self._obligation_payload(obligation),
+                "resolution_candidate": evidence,
+                "reason": semantic.reason,
+            }
+
+        resolving_action = self.actions.find_by_sent_message_id(message.id)
+        if resolving_action:
+            resolution_status = "RESOLVED_BY_AGENT"
+            event_type = "OBLIGATION_RESOLVED_BY_AGENT"
+        else:
+            resolution_status = "RESOLVED_BY_USER"
+            event_type = "OBLIGATION_RESOLVED_BY_USER"
+
+        resolved_at = datetime.fromtimestamp(message.internal_date_ms / 1000, tz=timezone.utc)
         obligation = self.obligations.resolve(
             obligation=obligation,
             status=resolution_status,
             resolved_at=resolved_at,
             message_id=message.id,
-            reason=reason,
+            reason=semantic.reason,
             evidence=evidence,
             resolving_action_id=resolving_action.id if resolving_action else None,
         )
@@ -286,6 +325,7 @@ class GmailReconciliationWorkflow:
                 "resolution_status": resolution_status,
                 "resolving_message_id": message.id,
                 "resolving_action_id": resolving_action.id if resolving_action else None,
+                "semantic_resolution": semantic.model_dump(),
                 "evidence": evidence,
             },
         )
@@ -297,7 +337,7 @@ class GmailReconciliationWorkflow:
             "current_status": action.current_status,
             "obligation": self._obligation_payload(obligation),
             "resolution_status": resolution_status,
-            "reason": reason,
+            "reason": semantic.reason,
             "resolving_message": evidence,
         }
 
@@ -342,11 +382,13 @@ class GmailReconciliationWorkflow:
 
     @staticmethod
     def _latest_sent_after_obligation(obligation: Obligation, messages: list):
-        trigger_ms = int((obligation.context or {}).get("trigger_internal_date_ms") or 0)
+        context = obligation.context or {}
+        trigger_ms = int(context.get("trigger_internal_date_ms") or 0)
+        checkpoint_ms = int(context.get("last_resolution_candidate_internal_date_ms") or trigger_ms)
         later_sent = [
             message
             for message in messages
-            if message.internal_date_ms > trigger_ms and "SENT" in message.labels
+            if message.internal_date_ms > checkpoint_ms and "SENT" in message.labels
         ]
         if not later_sent:
             return None
@@ -365,4 +407,5 @@ class GmailReconciliationWorkflow:
             "trigger_message_id": obligation.trigger_message_id,
             "resolved_at": obligation.resolved_at,
             "resolution": obligation.resolution,
+            "context": obligation.context,
         }

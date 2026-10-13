@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.integrations.gmail.content import extract_authored_text
 from app.integrations.gmail.models import GmailMessage
 from app.models import Action
 from app.providers.base import ModelProvider
@@ -38,11 +39,21 @@ class EmailReconciler:
                 reason="A later delivery-failure event invalidated the business outcome after the send was verified.",
             )
 
+        authored_body = extract_authored_text(later_message.body)
+        if not authored_body:
+            return ReconciliationDecision(
+                classification="NO_MATERIAL_CHANGE",
+                original_action_validity="STILL_VALID",
+                requires_follow_up=False,
+                reason="No new authored content was found outside quoted thread history.",
+            )
+
         prompt = f"""
 You are Jiraya's temporal reconciliator.
 
 A prior EMAIL_REPLY action was VERIFIED_SUCCESS at execution time. A newer incoming
-message later appeared in the same Gmail thread. Classify what the newer event means.
+message later appeared in the same Gmail thread. Classify what the NEWLY AUTHORED content
+of that message means.
 
 Return ONLY one JSON object with exactly these fields:
 {{
@@ -54,10 +65,12 @@ Return ONLY one JSON object with exactly these fields:
 
 Rules:
 - NEW_OBLIGATION: the old action remains valid, but the later message introduces a new request, task, question, deadline, interview step, or commitment.
-- SUPERSEDED_LATER: the old action succeeded, but a later authoritative message replaces a previously relevant detail or state, such as changing Wednesday to Friday. Use the previous reconciliation context when present.
+- SUPERSEDED_LATER: a later authoritative message replaces an already established detail or state. A previous proposal/question that was never accepted is NOT an established state; replacing one proposal with another should normally remain NEW_OBLIGATION.
 - EXTERNALLY_INVALIDATED: the old action succeeded when executed, but a later external event makes its intended outcome invalid or unusable.
-- NO_MATERIAL_CHANGE: the newer message is acknowledgement, thanks, informational only, or otherwise creates no new obligation and does not replace/invalidate prior state.
+- NO_MATERIAL_CHANGE: acknowledgement, thanks, informational content, or no meaningful new obligation/change.
 - Never rewrite history. A verified action must not be reclassified as an execution failure merely because the world changed afterward.
+- Use previous_reconciliation as context, but do not treat an unresolved proposal as a confirmed commitment.
+- Evaluate ONLY newly_authored_body. Quoted conversation history has already been removed.
 
 Prior action:
 action_type={action.action_type}
@@ -70,7 +83,7 @@ previous_reconciliation={json.dumps(action.last_reconciliation or {}, ensure_asc
 Later message:
 from={later_message.sender}
 subject={later_message.subject}
-body={later_message.body[:8000]}
+newly_authored_body={authored_body[:8000]}
 """.strip()
 
         raw = self.provider.complete(prompt, enable_thinking=False)

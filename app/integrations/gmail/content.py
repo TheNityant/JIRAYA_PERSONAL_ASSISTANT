@@ -15,25 +15,38 @@ def extract_authored_text(body: str) -> str:
     if not text:
         return ""
 
+    gmail_quote = re.search(
+        r"(?:^|\n)On\s.+?\bwrote:\s*(?:\n|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if gmail_quote:
+        text = text[: gmail_quote.start()].strip()
+
+    original_message = re.search(
+        r"(?:^|\n)-{2,}\s*Original Message\s*-{2,}(?:\n|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if original_message:
+        text = text[: original_message.start()].strip()
+
+    if not text:
+        return ""
+
     kept: list[str] = []
     for line in text.split("\n"):
         stripped = line.strip()
-
-        if re.match(r"^On\s.+\bwrote:\s*$", stripped, flags=re.IGNORECASE):
-            break
-        if re.match(r"^-{2,}\s*Original Message\s*-{2,}$", stripped, flags=re.IGNORECASE):
-            break
         if re.match(r"^_{5,}$", stripped):
             break
         if stripped.startswith(">"):
             break
-
         kept.append(line)
 
     authored = "\n".join(kept).strip()
 
     header_block = re.search(
-        r"\n(?:From|Sent|To|Subject):\s.+(?:\n|$)",
+        r"(?:^|\n)(?:From|Sent|To|Subject):\s.+(?:\n|$)",
         authored,
         flags=re.IGNORECASE,
     )

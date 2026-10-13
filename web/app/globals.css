@@ -21,7 +21,7 @@ button { cursor: pointer; }
 .workspace {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 340px;
+  grid-template-columns: 270px minmax(0, 1fr) 360px;
   background: var(--bg);
 }
 
@@ -46,6 +46,16 @@ button { cursor: pointer; }
 .status-dot.off { background: #59616c; }
 .preset-card { display: block; border-color: var(--border); background: var(--panel-2); }
 .preset-card span { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+.connections-heading { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 16px; }
+.connection-list { padding: 2px 10px 10px; display: grid; gap: 7px; }
+.connection-card { border: 1px solid var(--border); border-radius: 10px; background: #0f1217; padding: 10px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.connection-copy { min-width: 0; }
+.connection-copy strong, .connection-copy span { display: block; }
+.connection-copy strong { font-size: 12px; }
+.connection-copy span { color: var(--muted); font-size: 10px; line-height: 1.35; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; }
+.connection-action { flex: none; border: 1px solid #39414c; background: var(--panel-2); color: var(--text); border-radius: 7px; padding: 6px 8px; font-size: 10px; }
+.connection-action.connected { color: var(--success); border-color: rgba(117,184,147,.35); }
+.connection-coming { color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 7px; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
 .sidebar-footer { margin-top: auto; padding: 16px; border-top: 1px solid var(--border); }
 .sidebar-footer strong { display: block; margin-top: 4px; font-size: 12px; font-weight: 500; color: var(--soft); }
 
@@ -58,15 +68,16 @@ button { cursor: pointer; }
 .primary-button { background: var(--text); color: #111; }
 .secondary-button { background: var(--panel-2); color: var(--text); }
 
-.flow-area { flex: 1; min-height: 540px; background: #0d1014; }
-.react-flow__node { background: var(--panel-2) !important; color: var(--text) !important; border: 1px solid #343b46 !important; border-radius: 12px !important; box-shadow: 0 12px 30px rgba(0,0,0,.22); padding: 0 !important; }
-.react-flow__node.selected { border-color: #788390 !important; }
-.react-flow__edge-path { stroke: #59626e !important; stroke-width: 1.4 !important; }
+.flow-area { flex: 1; min-height: 600px; background: #0d1014; }
+.react-flow__node { background: var(--panel-2) !important; color: var(--text) !important; border: 1px solid #343b46 !important; border-radius: 13px !important; box-shadow: 0 14px 34px rgba(0,0,0,.24); padding: 0 !important; }
+.react-flow__node.selected { border-color: #8793a1 !important; box-shadow: 0 0 0 1px rgba(135,147,161,.18), 0 14px 34px rgba(0,0,0,.28); }
+.react-flow__edge-path { stroke: #68727f !important; stroke-width: 1.7 !important; }
 .react-flow__controls { background: var(--panel) !important; border: 1px solid var(--border); box-shadow: none !important; }
 .react-flow__controls button { background: var(--panel) !important; border-color: var(--border) !important; fill: var(--soft) !important; }
-.flow-node { padding: 12px 13px; min-height: 76px; }
-.flow-node-kicker { display: block; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 9px; }
-.flow-node strong { display: block; font-size: 12px; line-height: 1.35; font-weight: 600; }
+.flow-node { padding: 15px 16px; min-height: 94px; }
+.flow-node.assurance-node { background: linear-gradient(180deg, rgba(117,184,147,.075), rgba(117,184,147,.025)); border-radius: 12px; }
+.flow-node-kicker { display: block; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 10px; }
+.flow-node strong { display: block; font-size: 13px; line-height: 1.4; font-weight: 600; }
 .preview-strip { border-top: 1px solid var(--border); padding: 12px 18px; display: flex; justify-content: space-between; gap: 18px; background: var(--panel); }
 .preview-strip strong { display: block; margin-top: 4px; font-size: 12px; }
 .preview-result { max-width: 56%; text-align: right; }
@@ -92,6 +103,6 @@ button { cursor: pointer; }
 .danger-link { background: none; border: none; padding: 4px 0; color: var(--danger); font-size: 11px; }
 
 @media (max-width: 1180px) {
-  .workspace { grid-template-columns: 210px minmax(0, 1fr); }
+  .workspace { grid-template-columns: 230px minmax(0, 1fr); }
   .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); max-height: none; }
 }

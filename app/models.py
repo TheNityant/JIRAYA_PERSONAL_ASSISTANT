@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, JSON, String
+from sqlalchemy import Boolean, DateTime, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -48,12 +48,7 @@ class Action(Base):
 
 
 class Obligation(Base):
-    """A first-class piece of work that remains outstanding after an observed event.
-
-    Events are facts, Actions are things Jiraya/user did, and Obligations represent
-    work that still needs to be completed. Keeping them separate lets Jiraya close a
-    stale alert when the user handles something manually outside the agent.
-    """
+    """A first-class piece of work that remains outstanding after an observed event."""
 
     __tablename__ = "obligations"
 
@@ -76,3 +71,32 @@ class Obligation(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Automation(Base):
+    """User-owned workflow definition executed by Jiraya's generic automation runtime.
+
+    Configuration lives as structured JSON so the UI can evolve without adding a new
+    Python workflow file for every user intent. The runtime still validates supported
+    sources, triggers, actions, and policies before execution.
+    """
+
+    __tablename__ = "automations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    description: Mapped[str] = mapped_column(String(1000), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    source: Mapped[str] = mapped_column(String(80), index=True)
+    trigger_type: Mapped[str] = mapped_column(String(120), index=True)
+    match_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    context_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    action_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    approval_policy: Mapped[str] = mapped_column(String(80), default="REQUIRED", index=True)
+    system_pipeline: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

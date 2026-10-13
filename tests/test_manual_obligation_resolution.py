@@ -11,17 +11,20 @@ from app.services.obligation_store import ObligationStore
 from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
 
 
-class NeverCalledProvider(ModelProvider):
+class ResolvingProvider(ModelProvider):
     @property
     def provider_name(self) -> str:
-        return "never-called"
+        return "fake"
 
     @property
     def model_name(self) -> str:
-        return "never-called"
+        return "fake-model"
 
     def complete(self, message: str, *, enable_thinking: bool = True) -> str:
-        raise AssertionError("Manual resolution should not require the LLM")
+        return (
+            '{"resolves":true,"confidence":0.99,'
+            '"reason":"The user supplied a concrete alternative interview time."}'
+        )
 
 
 class FakeGmail:
@@ -112,7 +115,7 @@ def test_phase2a_obligation_is_backfilled_then_manual_reply_resolves_it():
         )
         result = GmailReconciliationWorkflow(
             db=db,
-            provider=NeverCalledProvider(),
+            provider=ResolvingProvider(),
             gmail=gmail,
         ).run(action_id=action.id)
 

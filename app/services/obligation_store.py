@@ -85,6 +85,30 @@ class ObligationStore:
         self.db.refresh(obligation)
         return obligation
 
+    def note_resolution_candidate(
+        self,
+        *,
+        obligation: Obligation,
+        message_id: str,
+        resolves: bool,
+        confidence: float,
+        reason: str,
+    ) -> Obligation:
+        obligation.context = {
+            **(obligation.context or {}),
+            "last_resolution_candidate_id": message_id,
+            "last_resolution_candidate": {
+                "resolves": resolves,
+                "confidence": confidence,
+                "reason": reason,
+            },
+        }
+        obligation.updated_at = datetime.now(timezone.utc)
+        self.db.add(obligation)
+        self.db.commit()
+        self.db.refresh(obligation)
+        return obligation
+
     def resolve(
         self,
         *,

@@ -27,6 +27,16 @@ class ObligationStore:
         )
         return self.db.scalars(statement).first()
 
+    def for_action_trigger(self, *, action_id: str, trigger_message_id: str) -> Obligation | None:
+        statement = (
+            select(Obligation)
+            .where(Obligation.related_action_id == action_id)
+            .where(Obligation.trigger_message_id == trigger_message_id)
+            .order_by(Obligation.updated_at.desc(), Obligation.created_at.desc())
+            .limit(1)
+        )
+        return self.db.scalars(statement).first()
+
     def upsert_from_reconciliation(
         self,
         *,

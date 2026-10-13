@@ -47,6 +47,11 @@ class ObligationStore:
         message_internal_date_ms: int,
         evidence: dict,
     ) -> Obligation:
+        exact = self.for_action_trigger(action_id=action.id, trigger_message_id=message_id)
+        if exact and exact.status in TERMINAL_STATUSES:
+            # Backfill/replay must never reopen a trigger that was already resolved.
+            return exact
+
         existing = self.open_for_action(action.id)
         now = datetime.now(timezone.utc)
         title = self._title_for(classification)

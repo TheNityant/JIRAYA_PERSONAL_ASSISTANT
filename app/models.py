@@ -45,3 +45,34 @@ class Action(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class Obligation(Base):
+    """A first-class piece of work that remains outstanding after an observed event.
+
+    Events are facts, Actions are things Jiraya/user did, and Obligations represent
+    work that still needs to be completed. Keeping them separate lets Jiraya close a
+    stale alert when the user handles something manually outside the agent.
+    """
+
+    __tablename__ = "obligations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    obligation_type: Mapped[str] = mapped_column(String(120), index=True)
+    source: Mapped[str] = mapped_column(String(100), index=True)
+    source_entity_id: Mapped[str] = mapped_column(String(255), index=True)
+    related_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    external_thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    trigger_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(80), index=True, default="OPEN")
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(String(2000), default="")
+    context: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    resolution: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -56,12 +56,13 @@ def gmail_message(
     )
 
 
-def test_manual_sent_message_resolves_open_obligation():
+def test_phase2a_obligation_is_backfilled_then_manual_reply_resolves_it():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     verified_at = datetime.now(timezone.utc)
     trigger_at = verified_at + timedelta(minutes=5)
     manual_reply_at = trigger_at + timedelta(minutes=3)
+    trigger_ms = int(trigger_at.timestamp() * 1000)
 
     with Session(engine) as db:
         action = Action(
@@ -75,26 +76,23 @@ def test_manual_sent_message_resolves_open_obligation():
             current_status="VERIFIED_SUCCESS",
             context={"source_message_id": "source-1", "sent_message_id": "sent-1"},
             verification_evidence={},
+            # This mirrors a real Phase-2A row created before obligations existed.
             last_reconciliation={
                 "classification": "NEW_OBLIGATION",
                 "message_id": "incoming-1",
                 "requires_follow_up": True,
+                "reason": "Reply with interview availability",
+                "evidence": {
+                    "message_id": "incoming-1",
+                    "thread_id": "thread-1",
+                    "internal_date_ms": trigger_ms,
+                },
             },
             executed_at=verified_at - timedelta(seconds=1),
             verified_at=verified_at,
         )
         db.add(action)
         db.commit()
-
-        obligations = ObligationStore(db)
-        obligation = obligations.upsert_from_reconciliation(
-            action=action,
-            classification="NEW_OBLIGATION",
-            reason="Reply with interview availability",
-            message_id="incoming-1",
-            message_internal_date_ms=int(trigger_at.timestamp() * 1000),
-            evidence={"message_id": "incoming-1"},
-        )
 
         gmail = FakeGmail(
             [
@@ -121,4 +119,8 @@ def test_manual_sent_message_resolves_open_obligation():
         assert result["decision"] == "OBLIGATION_RESOLVED"
         assert result["resolution_status"] == "RESOLVED_BY_USER"
         assert result["obligation"]["status"] == "RESOLVED_BY_USER"
-        assert obligations.get(obligation.id).status == "RESOLVED_BY_USER"
+
+        obligations = ObligationStore(db).list_recent()
+        assert len(obligations) == 1
+        assert obligations[0].status == "RESOLVED_BY_USER"
+        assert obligations[0].trigger_message_id == "incoming-1"

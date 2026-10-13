@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.integrations.gmail.client import GmailClient
+from app.integrations.gmail.connection import get_gmail_client
 from app.providers.nebius import NebiusProvider
 from app.services.action_store import ActionStore
 from app.services.obligation_store import ObligationStore
@@ -79,7 +79,7 @@ def reconcile_gmail(
         workflow = GmailReconciliationWorkflow(
             db=db,
             provider=NebiusProvider(settings),
-            gmail=GmailClient(settings),
+            gmail=get_gmail_client(db, settings),
         )
         return workflow.run(action_id=request.action_id)
     except Exception as exc:

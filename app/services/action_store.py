@@ -53,6 +53,17 @@ class ActionStore:
     def get(self, action_id: str) -> Action | None:
         return self.db.get(Action, action_id)
 
+    def find_by_sent_message_id(self, message_id: str) -> Action | None:
+        """Resolve a Gmail SENT message to a Jiraya action when one exists.
+
+        JSON querying differs between SQLite and PostgreSQL. The action set is tiny in
+        the current MVP, so a portable scan keeps tests and production behavior aligned.
+        """
+        for action in self.db.scalars(select(Action).order_by(Action.created_at.desc())).all():
+            if (action.context or {}).get("sent_message_id") == message_id:
+                return action
+        return None
+
     def latest_verified_email_action(self) -> Action | None:
         statement = (
             select(Action)

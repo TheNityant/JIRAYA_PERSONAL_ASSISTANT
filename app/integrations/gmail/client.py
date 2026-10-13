@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
 from typing import Any
 
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from app.config import Settings
@@ -13,10 +14,16 @@ from app.integrations.gmail.models import GmailMessage
 
 
 class GmailClient:
-    def __init__(self, settings: Settings, *, interactive_auth: bool = False):
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        interactive_auth: bool = False,
+        credentials: Credentials | None = None,
+    ):
         self.settings = settings
-        credentials = load_credentials(settings, interactive=interactive_auth)
-        self.service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+        resolved_credentials = credentials or load_credentials(settings, interactive=interactive_auth)
+        self.service = build("gmail", "v1", credentials=resolved_credentials, cache_discovery=False)
 
     def get_profile(self) -> dict[str, Any]:
         return self.service.users().getProfile(userId="me").execute()

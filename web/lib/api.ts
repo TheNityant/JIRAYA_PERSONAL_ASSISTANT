@@ -19,7 +19,33 @@ export type AutomationInput = Omit<
   "id" | "system_pipeline" | "created_at" | "updated_at"
 >;
 
-const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.0.1:8000";
+export type ConnectionCatalogItem = {
+  id: string;
+  provider: string;
+  label: string;
+  description: string;
+  status: "AVAILABLE" | "CONNECTED" | "COMING_NEXT";
+  account: string | null;
+  connect_path: string | null;
+};
+
+export type ConnectionsResponse = {
+  mode: string;
+  user: { id: string; email: string };
+  connections: Array<{
+    id: string;
+    provider: string;
+    provider_account_id: string;
+    display_name: string;
+    status: string;
+    scopes: string[];
+    token_expires_at: string | null;
+    updated_at: string;
+  }>;
+  catalog: ConnectionCatalogItem[];
+};
+
+export const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -51,4 +77,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message_id: messageId || null }),
     }),
+  listConnections: () => request<ConnectionsResponse>("/connections"),
+  disconnectGoogle: () =>
+    request<{ disconnected: boolean; provider: string }>("/connections/google/disconnect", {
+      method: "POST",
+    }),
+  googleConnectUrl: () => `${API_BASE}/connections/google/start`,
 };

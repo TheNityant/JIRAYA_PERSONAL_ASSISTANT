@@ -105,12 +105,7 @@ class NotificationStore:
         return len(items)
 
     def mark_automation_attention_read(self, *, automation_id: str) -> int:
-        """Retire old approval/attention cards when the automation configuration changes.
-
-        The current prototype is single-user. Keeping the historical notification but
-        marking it read prevents an old "waiting for approval" card from looking like the
-        current AUTO policy still requires approval.
-        """
+        """Retire old approval/attention cards when automation configuration changes."""
         statement = (
             select(Notification)
             .where(Notification.automation_id == automation_id)
@@ -123,6 +118,11 @@ class NotificationStore:
         now = datetime.now(timezone.utc)
         for item in items:
             item.read_at = now
+            item.notification_metadata = {
+                **(item.notification_metadata or {}),
+                "superseded_by_config": True,
+                "superseded_at": now.isoformat(),
+            }
             self.db.add(item)
         self.db.commit()
         return len(items)

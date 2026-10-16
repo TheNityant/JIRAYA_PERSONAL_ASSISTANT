@@ -42,8 +42,10 @@ export type AutomationRunResponse = {
   decision: string;
   automation_id?: string;
   action_id?: string;
+  obligation_id?: string;
   verification_status?: string;
   reason?: string;
+  action_route?: { decision: string; confidence: number; reason: string };
   message?: {
     id: string;
     thread_id: string;
@@ -84,6 +86,54 @@ export type ConnectionsResponse = {
     updated_at: string;
   }>;
   catalog: ConnectionCatalogItem[];
+};
+
+export type JirayaNotification = {
+  id: string;
+  category: "ACTION_REQUIRED" | "AUTOMATION_EXECUTED" | "INFORMATION" | "STATE_CHANGED" | string;
+  severity: string;
+  title: string;
+  message: string;
+  source: string;
+  source_entity_id: string | null;
+  automation_id: string | null;
+  action_id: string | null;
+  obligation_id: string | null;
+  metadata: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type NotificationResponse = {
+  unread_count: number;
+  items: JirayaNotification[];
+};
+
+export type Obligation = {
+  id: string;
+  obligation_type: string;
+  source: string;
+  source_entity_id: string;
+  related_action_id: string | null;
+  external_thread_id: string | null;
+  trigger_message_id: string | null;
+  status: string;
+  title: string;
+  description: string;
+  context: Record<string, unknown>;
+  resolution: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};
+
+export type GmailRuntimeStatus = {
+  background_monitor_enabled: boolean;
+  poll_seconds: number;
+  pubsub_configured: boolean;
+  pubsub_topic: string | null;
+  history_cursor: string | null;
+  mailbox: string | null;
 };
 
 export const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.0.1:8000";
@@ -140,4 +190,15 @@ export const api = {
       method: "POST",
     }),
   googleConnectUrl: () => `${API_BASE}/connections/google/start`,
+  listNotifications: (category?: string) =>
+    request<NotificationResponse>(
+      `/notifications${category ? `?category=${encodeURIComponent(category)}` : ""}`,
+    ),
+  markNotificationRead: (id: string) =>
+    request<JirayaNotification>(`/notifications/${id}/read`, { method: "POST" }),
+  listObligations: (status?: string) =>
+    request<Obligation[]>(`/obligations${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  gmailRuntimeStatus: () => request<GmailRuntimeStatus>("/runtime/gmail/status"),
+  pollGmailRuntime: () => request<any>("/runtime/gmail/poll", { method: "POST" }),
+  registerGmailWatch: () => request<any>("/runtime/gmail/watch/register", { method: "POST" }),
 };

@@ -39,6 +39,17 @@ class ConnectionStore:
         )
         return self.db.scalars(statement).first()
 
+    def get_active_account(self, *, provider: str, provider_account_id: str) -> Connection | None:
+        statement = (
+            select(Connection)
+            .where(Connection.provider == provider)
+            .where(Connection.provider_account_id == provider_account_id)
+            .where(Connection.status == "CONNECTED")
+            .order_by(Connection.updated_at.desc())
+            .limit(1)
+        )
+        return self.db.scalars(statement).first()
+
     def upsert(
         self,
         *,
@@ -104,6 +115,14 @@ class ConnectionStore:
         self.db.refresh(connection)
         return connection
 
+    def update_metadata(self, connection: Connection, values: dict) -> Connection:
+        connection.connection_metadata = {**(connection.connection_metadata or {}), **values}
+        connection.updated_at = datetime.now(timezone.utc)
+        self.db.add(connection)
+        self.db.commit()
+        self.db.refresh(connection)
+        return connection
+
     def disconnect(self, *, user_id: str, provider: str) -> Connection | None:
         connection = self.get_active(user_id=user_id, provider=provider)
         if connection is None:
@@ -139,7 +158,6 @@ class ConnectionStore:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         valid = expires_at > datetime.now(timezone.utc)
 
-        # OAuth state is single-use whether valid or expired.
         self.db.delete(record)
         self.db.commit()
         return record if valid else None

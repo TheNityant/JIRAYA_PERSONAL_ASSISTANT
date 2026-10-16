@@ -57,6 +57,38 @@ function when(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
 }
 
+function toInput(item: Automation): AutomationInput {
+  return {
+    name: item.name,
+    description: item.description,
+    enabled: item.enabled,
+    source: item.source,
+    trigger_type: item.trigger_type,
+    match_config: { ...item.match_config },
+    context_config: { ...item.context_config },
+    action_config: { ...item.action_config },
+    approval_policy: item.approval_policy,
+  };
+}
+
+function notificationLabel(category: string): string {
+  return {
+    ACTION_REQUIRED: "Needs you",
+    AUTOMATION_EXECUTED: "Done by Jiraya",
+    INFORMATION: "FYI",
+    STATE_CHANGED: "State changed",
+  }[category] ?? nice(category);
+}
+
+function notificationIcon(category: string): string {
+  return {
+    ACTION_REQUIRED: "!",
+    AUTOMATION_EXECUTED: "✓",
+    INFORMATION: "i",
+    STATE_CHANGED: "↻",
+  }[category] ?? "•";
+}
+
 function buildNodes(draft: AutomationInput): Node[] {
   const semantic = str(draft.match_config.semantic_condition) || "Any configured match";
   const action = str(draft.action_config.type) || "DRAFT_REPLY";
@@ -94,6 +126,9 @@ export default function AutomationBuilder() {
   const [selected, setSelected] = useState<Automation | null>(null);
   const [draft, setDraft] = useState<AutomationInput>(emptyAutomation);
   const [status, setStatus] = useState("Loading workspace...");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [preview, setPreview] = useState<any>(null);
   const [runResult, setRunResult] = useState<AutomationRunResponse | null>(null);
   const [executionDraft, setExecutionDraft] = useState("");
@@ -117,6 +152,11 @@ export default function AutomationBuilder() {
   async function refreshConnections() {
     const response = await api.listConnections();
     setConnections(response.catalog);
+  }
+
+  async function refreshRuntime() {
+    const runtimeResponse = await api.gmailRuntimeStatus();
+    setRuntime(runtimeResponse);
   }
 
   async function refreshOperations() {
@@ -147,43 +187,58 @@ export default function AutomationBuilder() {
       );
       window.history.replaceState({}, "", window.location.pathname);
     }
-
-    const timer = window.setInterval(() => {
-      refreshOperations().catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    const fresh = buildNodes(draft);
-    setNodes((current) =>
-      current.map((node) => {
-        const replacement = fresh.find((item) => item.id === node.id);
-        return replacement ? { ...node, data: replacement.data, style: replacement.style } : node;
-      }),
-    );
-  }, [draft, setNodes]);
+    // Do not hammer all operations endpoints while the user is typing in the automation
+    // editor. The old five-second full refresh rerendered the entire React Flow canvas and
+    // made the configuration panel feel frozen. Operations views still refresh quickly.
+    const delay = activeView === "AUTOMATIONS" ? 15000 : 5000;
+    const timer = window.setInterval(() => {
+      if (activeView === "AUTOMATIONS") {
+        refreshRuntime().catch(() => undefined);
+      } else {
+        refreshOperations().catch(() => undefined);
+      }
+    }, delay);
+    if (activeView !== "AUTOMATIONS") refreshOperations().catch(() => undefined);
+    return () => window.clearInterval(timer);
+  }, [activeView]);
+
+  const flowSignature = [
+    str(draft.match_config.semantic_condition),
+    str(draft.context_config.instructions),
+    str(draft.action_config.type),
+    draft.approval_policy,
+  ].join("\u0000");
+
+  useEffect(() => {
+    // Updating React Flow on every unrelated keystroke was expensive. Only fields shown
+    // on nodes participate, with a tiny debounce for long semantic/context textareas.
+    const timer = window.setTimeout(() => {
+      const fresh = buildNodes(draft);
+      setNodes((current) =>
+        current.map((node) => {
+          const replacement = fresh.find((item) => item.id === node.id);
+          return replacement ? { ...node, data: replacement.data, style: replacement.style } : node;
+        }),
+      );
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [flowSignature, setNodes]);
 
   function selectAutomation(item: Automation | null) {
     setSelected(item);
     setPreview(null);
     setRunResult(null);
     setExecutionDraft("");
+    setIsDirty(false);
+    setLastSavedAt(item?.updated_at ?? null);
     if (!item) {
       setDraft(emptyAutomation);
       return;
     }
-    setDraft({
-      name: item.name,
-      description: item.description,
-      enabled: item.enabled,
-      source: item.source,
-      trigger_type: item.trigger_type,
-      match_config: { ...item.match_config },
-      context_config: { ...item.context_config },
-      action_config: { ...item.action_config },
-      approval_policy: item.approval_policy,
-    });
+    setDraft(toInput(item));
   }
 
   const edges = useMemo<Edge[]>(() => {
@@ -206,37 +261,64 @@ export default function AutomationBuilder() {
     }));
   }, []);
 
+  function updateDraft(mutator: (current: AutomationInput) => AutomationInput) {
+    setDraft((current) => mutator(current));
+    setIsDirty(true);
+  }
+
   function updateMatch(key: string, value: unknown) {
-    setDraft((current) => ({
+    updateDraft((current) => ({
       ...current,
       match_config: { ...current.match_config, [key]: value },
     }));
   }
 
   function updateContext(key: string, value: unknown) {
-    setDraft((current) => ({
+    updateDraft((current) => ({
       ...current,
       context_config: { ...current.context_config, [key]: value },
     }));
   }
 
   function updateAction(key: string, value: unknown) {
-    setDraft((current) => ({
+    updateDraft((current) => ({
       ...current,
       action_config: { ...current.action_config, [key]: value },
     }));
   }
 
   async function save() {
+    if (isSaving) return;
+    setIsSaving(true);
     setStatus("Saving...");
     try {
       const saved = selected
         ? await api.updateAutomation(selected.id, draft)
         : await api.createAutomation(draft);
-      await refresh(saved.id);
-      setStatus("Saved");
+
+      // Use the server response as the source of truth immediately. Do not perform a
+      // second list/refetch round-trip that can race the controlled form and snap it back.
+      setAutomations((current) => {
+        const exists = current.some((item) => item.id === saved.id);
+        const next = exists
+          ? current.map((item) => (item.id === saved.id ? saved : item))
+          : [saved, ...current];
+        return [...next].sort(
+          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        );
+      });
+      setSelected(saved);
+      setDraft(toInput(saved));
+      setIsDirty(false);
+      setLastSavedAt(saved.updated_at);
+      setPreview(null);
+      setRunResult(null);
+      setExecutionDraft("");
+      setStatus(`Saved · ${saved.approval_policy === "AUTO" ? "Automatic" : nice(saved.approval_policy)}`);
     } catch (error: any) {
       setStatus(`Save failed: ${error.message}`);
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -253,7 +335,7 @@ export default function AutomationBuilder() {
 
   async function testLatestEmail() {
     if (!selected) return;
-    setStatus("Debug: testing latest unread Gmail...");
+    setStatus("Debug: testing latest Gmail...");
     try {
       const result = await api.previewGmail(selected.id);
       setPreview(result);
@@ -306,6 +388,7 @@ export default function AutomationBuilder() {
     setStatus("Disconnecting Google...");
     await api.disconnectGoogle();
     await refreshConnections();
+    await refreshRuntime();
     setStatus("Google disconnected");
   }
 
@@ -325,6 +408,10 @@ export default function AutomationBuilder() {
   );
   const filteredObligations = obligations.filter((item) =>
     obligationFilter === "OPEN" ? item.status === "OPEN" : item.status !== "OPEN",
+  );
+
+  const monitorConfiguredButUnhealthy = Boolean(
+    runtime?.background_monitor_configured && !runtime.background_monitor_enabled,
   );
 
   return (
@@ -361,7 +448,7 @@ export default function AutomationBuilder() {
               <span className={`status-dot ${item.enabled ? "on" : "off"}`} />
               <div>
                 <strong>{item.name}</strong>
-                <span>{item.source} · {item.trigger_type.toLowerCase().replaceAll("_", " ")}</span>
+                <span>{item.source} · {item.approval_policy === "AUTO" ? "automatic" : item.trigger_type.toLowerCase().replaceAll("_", " ")}</span>
               </div>
             </button>
           ))}
@@ -394,9 +481,15 @@ export default function AutomationBuilder() {
           <span className="small-label">Runtime</span>
           <strong className="runtime-line">
             <span className={`status-dot ${runtime?.background_monitor_enabled ? "on" : "off"}`} />
-            {runtime?.background_monitor_enabled ? `Gmail monitoring · ${runtime.poll_seconds}s` : "Gmail monitor paused"}
+            {runtime?.background_monitor_enabled
+              ? `Gmail monitoring · ${runtime.poll_seconds}s`
+              : monitorConfiguredButUnhealthy
+                ? "Gmail monitor needs attention"
+                : "Gmail monitor paused"}
           </strong>
           {runtime?.mailbox && <span className="runtime-mailbox">{runtime.mailbox}</span>}
+          {runtime?.last_poll_status === "ERROR" && <span className="runtime-mailbox">Last poll failed: {runtime.last_error ?? "unknown error"}</span>}
+          {runtime?.last_poll_status === "OK" && runtime.last_poll_decision && <span className="runtime-mailbox">Last poll: {nice(runtime.last_poll_decision)}</span>}
           <strong>{status}</strong>
         </div>
       </aside>
@@ -408,11 +501,14 @@ export default function AutomationBuilder() {
               <div>
                 <span className="eyebrow">Automation Builder</span>
                 <h1>{draft.name}</h1>
+                <span className="small-label">
+                  {isDirty ? "Unsaved changes" : lastSavedAt ? `Saved ${when(lastSavedAt)}` : "Not saved yet"}
+                </span>
               </div>
               <div className="topbar-actions">
                 {selected && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
                 {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>Debug · Run latest</button>}
-                <button className="primary-button" onClick={save}>{selected ? "Save changes" : "Create automation"}</button>
+                <button className="primary-button" onClick={save} disabled={isSaving}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
               </div>
             </header>
 
@@ -435,7 +531,7 @@ export default function AutomationBuilder() {
 
             {preview && (
               <div className={`preview-strip ${preview.match?.matches ? "matched" : "not-matched"}`}>
-                <div><span className="small-label">Debug preview</span><strong>{preview.message?.subject ?? "No unread message"}</strong></div>
+                <div><span className="small-label">Debug preview</span><strong>{preview.message?.subject ?? "No inbox message"}</strong></div>
                 {preview.match && <div className="preview-result"><strong>{preview.match.matches ? "MATCH" : "NO MATCH"}</strong><span>{Math.round(preview.match.confidence * 100)}% · {preview.match.reason}</span></div>}
               </div>
             )}
@@ -466,8 +562,8 @@ export default function AutomationBuilder() {
 
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">Configuration</span><h2>Automation logic</h2><p>Define what Jiraya should notice, what context it may use, and what action it may take.</p></div>
-            <label>Name<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
-            <label>Description<textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></label>
+            <label>Name<input value={draft.name} onChange={(e) => updateDraft((current) => ({ ...current, name: e.target.value }))} /></label>
+            <label>Description<textarea value={draft.description} onChange={(e) => updateDraft((current) => ({ ...current, description: e.target.value }))} /></label>
             <div className="section-divider" /><span className="section-title">Match incoming Gmail</span>
             <label>Semantic condition<textarea rows={5} placeholder="Example: A professor tells me an assignment/submission deadline." value={str(draft.match_config.semantic_condition)} onChange={(e) => updateMatch("semantic_condition", e.target.value)} /></label>
             <div className="two-column">
@@ -479,9 +575,9 @@ export default function AutomationBuilder() {
             <div className="section-divider" /><span className="section-title">Action &amp; policy</span>
             <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}><option value="DRAFT_REPLY">Draft reply</option><option value="NOTIFY">Notify me</option></select></label>
             <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>
-            <label>Approval policy<select value={draft.approval_policy} onChange={(e) => setDraft({ ...draft, approval_policy: e.target.value as AutomationInput["approval_policy"] })}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>
-            {draft.approval_policy === "AUTO" && <div className="policy-explainer">Automatic is context-aware: Jiraya can downgrade an unsafe or changed situation to approval or notification instead of blindly replying.</div>}
-            <label className="toggle-row"><span><strong>Automation enabled</strong><small>Enabled automations are watched automatically by the Gmail runtime.</small></span><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} /></label>
+            <label>Approval policy<select value={draft.approval_policy} onChange={(e) => updateDraft((current) => ({ ...current, approval_policy: e.target.value as AutomationInput["approval_policy"] }))}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>
+            {draft.approval_policy === "AUTO" && <div className="policy-explainer">Automatic means no approval prompt for a normal match. Jiraya sends when the configured action safely covers the message; changed or out-of-scope situations become a notification instead of silently switching back to approval.</div>}
+            <label className="toggle-row"><span><strong>Automation enabled</strong><small>Enabled automations are watched automatically by the Gmail runtime.</small></span><input type="checkbox" checked={draft.enabled} onChange={(e) => updateDraft((current) => ({ ...current, enabled: e.target.checked }))} /></label>
             {selected && <button className="danger-link" onClick={removeSelected}>Delete automation</button>}
           </aside>
         </>
@@ -489,16 +585,16 @@ export default function AutomationBuilder() {
         <section className="operations-page">
           {activeView === "NOTIFICATIONS" ? (
             <>
-              <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>Automatic actions, items that need you, informational alerts, and obligation state changes.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
+              <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>“Needs you” means you have work to review. “Done by Jiraya” is a completed automatic action. FYI is informational. State changes explain obligation lifecycle updates.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
               <div className="filter-tabs">
-                {["ALL", "ACTION_REQUIRED", "AUTOMATION_EXECUTED", "INFORMATION", "STATE_CHANGED"].map((filter) => <button key={filter} className={notificationFilter === filter ? "active" : ""} onClick={() => setNotificationFilter(filter)}>{filter === "ALL" ? "All" : nice(filter)}</button>)}
+                {["ALL", "ACTION_REQUIRED", "AUTOMATION_EXECUTED", "INFORMATION", "STATE_CHANGED"].map((filter) => <button key={filter} className={notificationFilter === filter ? "active" : ""} onClick={() => setNotificationFilter(filter)}>{filter === "ALL" ? "All" : notificationLabel(filter)}</button>)}
               </div>
               <div className="operations-list">
                 {filteredNotifications.map((item) => (
                   <button className={`notification-card ${item.read_at ? "read" : "unread"} severity-${item.severity.toLowerCase()}`} key={item.id} onClick={() => markRead(item)}>
-                    <div className="notification-card-top"><span className="notification-category">{nice(item.category)}</span><span>{when(item.created_at)}</span></div>
+                    <div className="notification-card-top"><span className="notification-category">{notificationIcon(item.category)} · {notificationLabel(item.category)}</span><span>{when(item.created_at)}</span></div>
                     <strong>{item.title}</strong><p>{item.message}</p>
-                    <div className="notification-meta"><span>{item.source}</span>{item.obligation_id && <span>Obligation linked</span>}{!item.read_at && <span>Unread</span>}</div>
+                    <div className="notification-meta"><span>{nice(item.source)}</span>{item.obligation_id && <span>Obligation linked</span>}{!item.read_at && <span>Unread</span>}</div>
                   </button>
                 ))}
                 {!filteredNotifications.length && <div className="empty-state"><strong>No notifications here.</strong><span>Background automation events will appear automatically.</span></div>}
@@ -506,14 +602,14 @@ export default function AutomationBuilder() {
             </>
           ) : (
             <>
-              <header className="operations-header"><div><span className="eyebrow">Obligations</span><h1>Work that remains true over time</h1><p>Jiraya keeps these open until later evidence proves they are resolved, superseded, or cancelled.</p></div></header>
+              <header className="operations-header"><div><span className="eyebrow">Obligations</span><h1>Work that remains true over time</h1><p>Only work that still requires an outcome stays open. A simple “okay, I’ll check” from the other person is not a new task for you; Jiraya records it as an informational thread update instead.</p></div></header>
               <div className="filter-tabs"><button className={obligationFilter === "OPEN" ? "active" : ""} onClick={() => setObligationFilter("OPEN")}>Open</button><button className={obligationFilter === "RESOLVED" ? "active" : ""} onClick={() => setObligationFilter("RESOLVED")}>Resolved / closed</button></div>
               <div className="operations-list obligation-grid">
                 {filteredObligations.map((item) => (
                   <article className={`obligation-card ${item.status === "OPEN" ? "open" : "closed"}`} key={item.id}>
                     <div className="obligation-card-top"><span>{nice(item.status)}</span><span>{when(item.updated_at)}</span></div>
                     <strong>{item.title}</strong><p>{item.description}</p>
-                    <div className="notification-meta"><span>{item.source}</span><span>{nice(item.obligation_type)}</span>{item.external_thread_id && <span>Gmail thread</span>}</div>
+                    <div className="notification-meta"><span>{nice(item.source)}</span><span>{nice(item.obligation_type)}</span>{item.external_thread_id && <span>Gmail thread</span>}</div>
                     {item.resolution && Object.keys(item.resolution).length > 0 && <div className="resolution-box"><span className="small-label">Resolution</span><p>{str(item.resolution.reason) || nice(item.status)}</p></div>}
                   </article>
                 ))}

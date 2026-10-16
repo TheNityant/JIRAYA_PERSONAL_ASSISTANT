@@ -105,11 +105,17 @@ class NotificationStore:
         return len(items)
 
     def mark_automation_attention_read(self, *, automation_id: str) -> int:
-        """Retire old approval/attention cards when automation configuration changes."""
+        """Retire stale non-obligation approval alerts after a config change.
+
+        Genuine obligation alerts carry an obligation_id and must remain visible until
+        their real-world work is actually resolved. This method only retires transient
+        approval/policy attention created by the older automation configuration.
+        """
         statement = (
             select(Notification)
             .where(Notification.automation_id == automation_id)
             .where(Notification.category == "ACTION_REQUIRED")
+            .where(Notification.obligation_id.is_(None))
             .where(Notification.read_at.is_(None))
         )
         items = list(self.db.scalars(statement).all())

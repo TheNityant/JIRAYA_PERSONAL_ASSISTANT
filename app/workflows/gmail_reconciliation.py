@@ -7,7 +7,10 @@ from app.integrations.gmail.client import GmailClient
 from app.models import Action, Obligation
 from app.providers.base import ModelProvider
 from app.reconciler.email_reconciler import EmailReconciler
-from app.reconciler.obligation_resolver import ObligationResolver
+from app.reconciler.obligation_resolver import (
+    OBLIGATION_RESOLVER_VERSION,
+    ObligationResolver,
+)
 from app.services.action_store import ActionStore
 from app.services.event_ledger import EventLedger
 from app.services.obligation_store import ObligationStore
@@ -265,6 +268,7 @@ class GmailReconciliationWorkflow:
             resolves=semantic.resolves,
             confidence=semantic.confidence,
             reason=semantic.reason,
+            resolver_version=OBLIGATION_RESOLVER_VERSION,
         )
 
         evidence = {
@@ -274,6 +278,7 @@ class GmailReconciliationWorkflow:
             "body_preview": message.body[:2000],
             "internal_date_ms": message.internal_date_ms,
             "semantic_resolution": semantic.model_dump(),
+            "resolver_version": OBLIGATION_RESOLVER_VERSION,
         }
 
         if not semantic.resolves:
@@ -286,6 +291,7 @@ class GmailReconciliationWorkflow:
                     "obligation_id": obligation.id,
                     "action_id": action.id,
                     "candidate_message_id": message.id,
+                    "resolver_version": OBLIGATION_RESOLVER_VERSION,
                     **semantic.model_dump(),
                 },
             )
@@ -330,6 +336,7 @@ class GmailReconciliationWorkflow:
                 "resolving_message_id": message.id,
                 "resolving_action_id": resolving_action.id if resolving_action else None,
                 "semantic_resolution": semantic.model_dump(),
+                "resolver_version": OBLIGATION_RESOLVER_VERSION,
                 "evidence": evidence,
             },
         )
@@ -388,7 +395,22 @@ class GmailReconciliationWorkflow:
     def _latest_sent_after_obligation(obligation: Obligation, messages: list):
         context = obligation.context or {}
         trigger_ms = int(context.get("trigger_internal_date_ms") or 0)
-        checkpoint_ms = int(context.get("last_resolution_candidate_internal_date_ms") or trigger_ms)
+        candidate = context.get("last_resolution_candidate") or {}
+        try:
+            candidate_version = int(candidate.get("resolver_version") or 0)
+        except (TypeError, ValueError):
+            candidate_version = 0
+
+        # Resolver semantics can improve over time. A candidate rejected by an older
+        # resolver may be reconsidered once under the current version; once evaluated by
+        # the current version, the normal checkpoint prevents repeated model calls.
+        if candidate and candidate_version < OBLIGATION_RESOLVER_VERSION:
+            checkpoint_ms = trigger_ms
+        else:
+            checkpoint_ms = int(
+                context.get("last_resolution_candidate_internal_date_ms") or trigger_ms
+            )
+
         later_sent = [
             message
             for message in messages

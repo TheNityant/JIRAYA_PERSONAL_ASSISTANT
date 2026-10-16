@@ -49,11 +49,21 @@ Rules:
 - A reply existing is NOT enough by itself.
 - Evaluate ONLY the newly authored content shown below. Quoted thread history has already
   been removed and must never be inferred as a new user answer.
-- resolves=true only when the authored content answers, performs, or clearly settles the
+- resolves=true when the authored content answers, performs, or clearly settles the
   requested task represented by the obligation.
+- If the obligation itself is to reply, provide an update, answer a question, share a
+  location/resource, or point the recipient to where the requested information can be
+  verified, then a substantive sent answer CAN fully resolve it.
+- Examples that can resolve an update/request obligation include: giving the requested
+  progress, providing a concrete alternative time, sharing the requested link/location,
+  or saying "check the GitHub repository" when the requested update is available there.
 - For an interview-availability request, giving availability or a concrete alternative
   time resolves it.
-- Acknowledgements such as "thanks", "noted", or "I'll reply later" do not resolve it.
+- For a real-world task such as submitting an assignment, merely saying "noted" or
+  "I'll do it" does not resolve the task. A message that credibly states the task was
+  completed can resolve it when that statement directly addresses the obligation.
+- Acknowledgements such as "thanks", "noted", "okay", or "I'll reply later" do not
+  resolve an obligation unless acknowledgement itself was the requested task.
 - If uncertain, return resolves=false.
 
 Open obligation:

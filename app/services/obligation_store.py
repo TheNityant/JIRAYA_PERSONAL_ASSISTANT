@@ -149,6 +149,7 @@ class ObligationStore:
         resolves: bool,
         confidence: float,
         reason: str,
+        resolver_version: int = 1,
     ) -> Obligation:
         obligation.context = {
             **(obligation.context or {}),
@@ -158,6 +159,7 @@ class ObligationStore:
                 "resolves": resolves,
                 "confidence": confidence,
                 "reason": reason,
+                "resolver_version": resolver_version,
             },
         }
         obligation.updated_at = datetime.now(timezone.utc)

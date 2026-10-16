@@ -53,9 +53,10 @@ subject={message.subject}
 newly_authored_body={body[:8000]}
 
 Rules:
-- AUTO_ACT only when the message is clearly the routine situation the automatic action was meant for.
-- REQUIRE_APPROVAL when a reply could still be useful but the situation contains changed details, a new request, uncertainty, or facts requiring human review.
-- NOTIFY_ONLY for complaints, failures, rejection, missing/incorrect work, disputes, sensitive changes, requests outside the configured instructions, or when repeating the prior style of reply would be inappropriate.
+- AUTO_ACT when this is clearly the routine situation described by the semantic condition AND the configured action instructions fully cover the response.
+- A request that is exactly what the automation was created to handle is NOT, by itself, a reason to require approval.
+- REQUIRE_APPROVAL when the message is relevant but introduces material facts, changed details, ambiguity, or a request that goes beyond what the configured action instructions safely cover.
+- NOTIFY_ONLY for complaints, failures, rejection, missing/incorrect work, disputes, sensitive changes, unsupported requests, or when repeating the configured reply would be inappropriate.
 - A broad topical match (for example 'submission') does NOT authorize a generic auto-reply to every message on that topic.
 - If uncertain, prefer REQUIRE_APPROVAL or NOTIFY_ONLY over AUTO_ACT.
 """.strip()

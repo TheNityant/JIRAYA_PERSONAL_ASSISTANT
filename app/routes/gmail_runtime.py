@@ -17,14 +17,29 @@ router = APIRouter(tags=["gmail-runtime"])
 @router.get("/runtime/gmail/status")
 def gmail_runtime_status(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
-    state = RuntimeStateStore(db).get(f"gmail-history:{settings.dev_user_id}") or {}
+    state_store = RuntimeStateStore(db)
+    state = state_store.get(f"gmail-history:{settings.dev_user_id}") or {}
+    health = state_store.get(f"gmail-monitor-health:{settings.dev_user_id}") or {}
+    monitor_operational = bool(
+        settings.gmail_background_monitor_enabled and health.get("last_status") == "OK"
+    )
     return {
-        "background_monitor_enabled": settings.gmail_background_monitor_enabled,
+        # Kept for the existing frontend: this now means the monitor is actually healthy,
+        # not merely that the configuration flag is turned on.
+        "background_monitor_enabled": monitor_operational,
+        "background_monitor_configured": settings.gmail_background_monitor_enabled,
         "poll_seconds": settings.gmail_background_poll_seconds,
         "pubsub_configured": bool(settings.gmail_pubsub_topic_name),
         "pubsub_topic": settings.gmail_pubsub_topic_name or None,
+        "web_oauth_configured": bool(
+            settings.google_oauth_client_id and settings.google_oauth_client_secret
+        ),
         "history_cursor": state.get("history_id"),
         "mailbox": state.get("email_address"),
+        "last_poll_at": health.get("last_poll_at"),
+        "last_poll_status": health.get("last_status"),
+        "last_poll_decision": health.get("last_decision"),
+        "last_error": health.get("last_error"),
     }
 
 

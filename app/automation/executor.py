@@ -77,6 +77,14 @@ class AutomationExecutor:
             automation_id=automation.id,
             source_event_id=message.id,
         )
+        if existing is not None and existing.status == "VERIFIED_SUCCESS":
+            return {
+                "decision": "ALREADY_EXECUTED",
+                "automation_id": automation.id,
+                "message": self._message_payload(message),
+                "match": match_payload,
+                "execution": self.execution_payload(existing),
+            }
         if existing is not None and not force:
             return {
                 "decision": "EXISTING_EXECUTION",

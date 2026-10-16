@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
-from app.automation.executor import AutomationExecutor
+from app.automation.reliable_executor import ReliableAutomationExecutor
 from app.config import Settings
 from app.integrations.gmail.connection import get_gmail_client
 from app.integrations.gmail.models import GmailMessage
@@ -16,6 +16,9 @@ from app.services.connection_store import ConnectionStore
 from app.services.notification_store import NotificationStore
 from app.services.runtime_state_store import RuntimeStateStore
 from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
+
+
+BOOTSTRAP_LOOKBACK_MS = 2 * 60 * 1000
 
 
 class GmailRuntimeService:
@@ -30,7 +33,7 @@ class GmailRuntimeService:
         self.notifications = NotificationStore(db)
         self.actions = ActionStore(db)
         self.automations = AutomationStore(db)
-        self.executor = AutomationExecutor(
+        self.executor = ReliableAutomationExecutor(
             settings=settings,
             db=db,
             provider=self.provider,
@@ -59,6 +62,9 @@ class GmailRuntimeService:
 
         state = self.state.get(self.cursor_key)
         if not state or not state.get("history_id"):
+            # Seed the cursor first, then optionally process only a very recent inbox item.
+            # This closes the startup race where the user sends a test message during the
+            # first monitor cycle and it would otherwise become part of the baseline.
             self.state.set(
                 self.cursor_key,
                 {
@@ -67,10 +73,12 @@ class GmailRuntimeService:
                     "email_address": email_address,
                 },
             )
+            bootstrap_result = self._bootstrap_recent_inbox()
             return {
                 "decision": "CURSOR_INITIALIZED",
-                "processed": 0,
+                "processed": 1 if bootstrap_result else 0,
                 "history_id": current_history_id,
+                "bootstrap_result": bootstrap_result,
                 "watch_error": watch_error,
             }
 
@@ -86,6 +94,18 @@ class GmailRuntimeService:
         if watch_error:
             result["watch_error"] = watch_error
         return result
+
+    def _bootstrap_recent_inbox(self) -> dict | None:
+        try:
+            message = self.gmail.get_latest_inbox()
+        except Exception:
+            return None
+        if message is None:
+            return None
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if message.internal_date_ms <= 0 or now_ms - message.internal_date_ms > BOOTSTRAP_LOOKBACK_MS:
+            return None
+        return self.process_message(message)
 
     def ensure_watch(self) -> dict | None:
         """Renew the Gmail watch when it is absent or within 24 hours of expiry."""
@@ -141,7 +161,13 @@ class GmailRuntimeService:
                     "email_address": str(profile.get("emailAddress") or email_address or ""),
                 },
             )
-            return {"decision": "CURSOR_INITIALIZED", "processed": 0, "history_id": history_id}
+            bootstrap_result = self._bootstrap_recent_inbox()
+            return {
+                "decision": "CURSOR_INITIALIZED",
+                "processed": 1 if bootstrap_result else 0,
+                "history_id": history_id,
+                "bootstrap_result": bootstrap_result,
+            }
 
         start_history_id = str(state["history_id"])
         try:
@@ -239,6 +265,7 @@ class GmailRuntimeService:
                 "AUTOMATION_DISABLED",
                 "UNSUPPORTED_TRIGGER",
             }:
+                # At most one reply-producing automation can own one incoming message.
                 reply_claimed = True
 
         return {
@@ -252,6 +279,12 @@ class GmailRuntimeService:
         decision = result.get("decision")
         obligation = result.get("obligation") or {}
         if decision == "OBLIGATION_RESOLVED":
+            obligation_id = obligation.get("id")
+            if obligation_id:
+                self.notifications.mark_obligation_notifications_read(
+                    user_id=self.settings.dev_user_id,
+                    obligation_id=obligation_id,
+                )
             self.notifications.create_once(
                 user_id=self.settings.dev_user_id,
                 category="STATE_CHANGED",
@@ -260,8 +293,8 @@ class GmailRuntimeService:
                 message=result.get("reason") or "Jiraya observed evidence that the obligation was completed.",
                 source="reconciliator",
                 action_id=action_id,
-                obligation_id=obligation.get("id"),
-                dedupe_key=f"obligation-resolved:{obligation.get('id')}:{result.get('resolution_status')}",
+                obligation_id=obligation_id,
+                dedupe_key=f"obligation-resolved:{obligation_id}:{result.get('resolution_status')}",
                 metadata={"result": decision, "resolution_status": result.get("resolution_status")},
             )
             return
@@ -279,4 +312,21 @@ class GmailRuntimeService:
                 obligation_id=obligation.get("id"),
                 dedupe_key=f"reconcile:{action_id}:{(result.get('later_message') or {}).get('message_id')}:{classification}",
                 metadata={"classification": classification},
+            )
+            return
+
+        if decision == "RECONCILED" and result.get("classification") == "NO_MATERIAL_CHANGE":
+            later = result.get("later_message") or {}
+            message_id = later.get("message_id")
+            self.notifications.create_once(
+                user_id=self.settings.dev_user_id,
+                category="INFORMATION",
+                severity="INFO",
+                title="Thread updated — no action required",
+                message=result.get("reason") or "Jiraya observed the reply and found no new work for you.",
+                source="reconciliator",
+                action_id=action_id,
+                obligation_id=obligation.get("id"),
+                dedupe_key=f"reconcile-no-action:{action_id}:{message_id}",
+                metadata={"classification": "NO_MATERIAL_CHANGE", "message_id": message_id},
             )

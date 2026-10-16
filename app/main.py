@@ -5,7 +5,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import init_db
-from app.routes import ai, automations, connections, events, gmail, health, reconciliation
+from app.routes import (
+    ai,
+    automation_execution,
+    automations,
+    connections,
+    events,
+    gmail,
+    health,
+    reconciliation,
+)
 
 
 @asynccontextmanager
@@ -17,10 +26,10 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
-    version="0.5.0",
+    version="0.6.0",
     description=(
-        "Phase-2D Jiraya API: user-configurable automations plus database-backed external "
-        "account connections, verified actions, temporal reconciliation, and obligations."
+        "Phase-2E Jiraya API: user-configurable automations with persisted execution, "
+        "draft/approval policy, verified Gmail actions, connections, reconciliation, and obligations."
     ),
     lifespan=lifespan,
 )
@@ -37,6 +46,7 @@ app.include_router(events.router)
 app.include_router(gmail.router)
 app.include_router(reconciliation.router)
 app.include_router(automations.router)
+app.include_router(automation_execution.router)
 app.include_router(connections.router)
 
 
@@ -44,7 +54,7 @@ app.include_router(connections.router)
 def root() -> dict:
     return {
         "name": settings.app_name,
-        "version": "0.5.0",
-        "phase": "phase-2d",
+        "version": "0.6.0",
+        "phase": "phase-2e",
         "docs": "/docs",
     }

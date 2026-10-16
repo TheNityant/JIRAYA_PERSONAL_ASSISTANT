@@ -12,7 +12,13 @@ import {
   useNodesState,
 } from "@xyflow/react";
 
-import { api, Automation, AutomationInput, ConnectionCatalogItem } from "@/lib/api";
+import {
+  api,
+  Automation,
+  AutomationInput,
+  AutomationRunResponse,
+  ConnectionCatalogItem,
+} from "@/lib/api";
 
 const emptyAutomation: AutomationInput = {
   name: "New automation",
@@ -73,6 +79,8 @@ export default function AutomationBuilder() {
   const [draft, setDraft] = useState<AutomationInput>(emptyAutomation);
   const [status, setStatus] = useState("Loading workspace...");
   const [preview, setPreview] = useState<any>(null);
+  const [runResult, setRunResult] = useState<AutomationRunResponse | null>(null);
+  const [executionDraft, setExecutionDraft] = useState("");
   const [connections, setConnections] = useState<ConnectionCatalogItem[]>([]);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(buildNodes(emptyAutomation));
 
@@ -120,6 +128,8 @@ export default function AutomationBuilder() {
   function selectAutomation(item: Automation | null) {
     setSelected(item);
     setPreview(null);
+    setRunResult(null);
+    setExecutionDraft("");
     if (!item) {
       setDraft(emptyAutomation);
       return;
@@ -213,6 +223,36 @@ export default function AutomationBuilder() {
     }
   }
 
+  async function runLatestEmail(force = false) {
+    if (!selected) return;
+    setStatus("Running automation on latest unread Gmail...");
+    try {
+      const result = await api.runGmailAutomation(selected.id, undefined, force);
+      setRunResult(result);
+      setExecutionDraft(result.execution?.draft_body ?? "");
+      setStatus(`Execution: ${result.decision.toLowerCase().replaceAll("_", " ")}`);
+    } catch (error: any) {
+      setStatus(`Execution failed: ${error.message}`);
+    }
+  }
+
+  async function approveExecution() {
+    if (!runResult?.execution) return;
+    setStatus("Sending approved draft...");
+    try {
+      const result = await api.approveExecution(runResult.execution.id, executionDraft);
+      setRunResult(result);
+      setExecutionDraft(result.execution?.draft_body ?? executionDraft);
+      setStatus(
+        result.verification_status
+          ? `Send result: ${result.verification_status}`
+          : `Approval: ${result.decision.toLowerCase().replaceAll("_", " ")}`,
+      );
+    } catch (error: any) {
+      setStatus(`Approval failed: ${error.message}`);
+    }
+  }
+
   async function removeSelected() {
     if (!selected) return;
     if (!window.confirm(`Delete automation “${selected.name}”?`)) return;
@@ -232,6 +272,12 @@ export default function AutomationBuilder() {
     await refreshConnections();
     setStatus("Google disconnected");
   }
+
+  const execution = runResult?.execution;
+  const approvable =
+    execution?.action_type === "DRAFT_REPLY" &&
+    execution.approval_policy === "REQUIRED" &&
+    ["AWAITING_APPROVAL", "BLOCKED_BY_POLICY"].includes(execution.status);
 
   return (
     <main className="workspace">
@@ -305,7 +351,8 @@ export default function AutomationBuilder() {
             <h1>{draft.name}</h1>
           </div>
           <div className="topbar-actions">
-            {selected && <button className="secondary-button" onClick={testLatestEmail}>Test latest Gmail</button>}
+            {selected && <button className="secondary-button" onClick={testLatestEmail}>Test match</button>}
+            {selected && <button className="secondary-button" onClick={() => runLatestEmail(false)}>Run latest Gmail</button>}
             <button className="primary-button" onClick={save}>{selected ? "Save changes" : "Create automation"}</button>
           </div>
         </header>
@@ -337,6 +384,63 @@ export default function AutomationBuilder() {
               <div className="preview-result">
                 <strong>{preview.match.matches ? "MATCH" : "NO MATCH"}</strong>
                 <span>{Math.round(preview.match.confidence * 100)}% · {preview.match.reason}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {runResult && (
+          <div className="execution-panel">
+            <div className="execution-header">
+              <div>
+                <span className="small-label">Automation execution</span>
+                <strong>{runResult.decision.replaceAll("_", " ")}</strong>
+              </div>
+              {runResult.match && (
+                <span className="execution-confidence">
+                  {Math.round(runResult.match.confidence * 100)}% match
+                </span>
+              )}
+            </div>
+
+            {execution?.action_type === "DRAFT_REPLY" && (
+              <div className="draft-workspace">
+                <label>
+                  Generated reply
+                  <textarea
+                    rows={8}
+                    value={executionDraft}
+                    onChange={(event) => setExecutionDraft(event.target.value)}
+                    readOnly={execution.status === "VERIFIED_SUCCESS"}
+                  />
+                </label>
+
+                <div className="execution-actions">
+                  {execution.approval_policy === "DRAFT_ONLY" && (
+                    <span className="execution-note">Draft-only policy: Jiraya will not send this message.</span>
+                  )}
+                  {execution.status === "BLOCKED_BY_POLICY" && (
+                    <span className="execution-note warning">
+                      External actions are disabled. Set ENABLE_EXTERNAL_ACTIONS=true before approving a real send.
+                    </span>
+                  )}
+                  {execution.status === "VERIFIED_SUCCESS" && (
+                    <span className="execution-note success">Sent and verified by Gmail.</span>
+                  )}
+                  {approvable && (
+                    <button className="primary-button" onClick={approveExecution}>Approve &amp; Send</button>
+                  )}
+                  {runResult.decision === "EXISTING_EXECUTION" && (
+                    <button className="secondary-button" onClick={() => runLatestEmail(true)}>Regenerate draft</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {execution?.action_type === "NOTIFY" && (
+              <div className="notification-result">
+                <strong>{str(execution.output.title) || "Jiraya notification"}</strong>
+                <p>{str(execution.output.message)}</p>
               </div>
             )}
           </div>

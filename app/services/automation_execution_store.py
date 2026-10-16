@@ -18,6 +18,7 @@ class AutomationExecutionStore:
             select(AutomationExecution)
             .where(AutomationExecution.automation_id == automation_id)
             .where(AutomationExecution.source_event_id == source_event_id)
+            .where(AutomationExecution.status != "SUPERSEDED_BY_CONFIG")
             .order_by(AutomationExecution.created_at.desc())
             .limit(1)
         )
@@ -83,6 +84,31 @@ class AutomationExecutionStore:
         self.db.commit()
         self.db.refresh(execution)
         return execution
+
+    def supersede_pending_for_automation(self, automation_id: str) -> list[AutomationExecution]:
+        pending_statuses = {
+            "DRAFT_READY",
+            "AWAITING_APPROVAL",
+            "AUTO_PENDING",
+            "BLOCKED_BY_POLICY",
+            "FALLBACK_NOTIFICATION",
+            "NOTIFICATION_READY",
+        }
+        statement = (
+            select(AutomationExecution)
+            .where(AutomationExecution.automation_id == automation_id)
+            .where(AutomationExecution.status.in_(pending_statuses))
+        )
+        items = list(self.db.scalars(statement).all())
+        if not items:
+            return []
+        now = datetime.now(timezone.utc)
+        for item in items:
+            item.status = "SUPERSEDED_BY_CONFIG"
+            item.updated_at = now
+            self.db.add(item)
+        self.db.commit()
+        return items
 
     def list_recent(self, *, automation_id: str | None = None, limit: int = 50) -> list[AutomationExecution]:
         statement = select(AutomationExecution)

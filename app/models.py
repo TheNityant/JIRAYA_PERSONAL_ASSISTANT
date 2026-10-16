@@ -97,6 +97,37 @@ class Automation(Base):
     )
 
 
+class AutomationExecution(Base):
+    """Persisted run state for a user-defined automation.
+
+    Drafts and approval state live here so browser refreshes do not lose pending work,
+    and repeated runs against the same source event can be made idempotent.
+    """
+
+    __tablename__ = "automation_executions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    automation_id: Mapped[str] = mapped_column(String(36), index=True)
+    correlation_id: Mapped[str] = mapped_column(String(255), index=True)
+    source: Mapped[str] = mapped_column(String(80), index=True, default="gmail")
+    source_event_id: Mapped[str] = mapped_column(String(255), index=True)
+    source_thread_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String(80), index=True)
+    approval_policy: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(80), index=True)
+    match_result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    draft_body: Mapped[str] = mapped_column(Text, default="")
+    output: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    action_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class User(Base):
     """Jiraya account identity.
 
@@ -115,11 +146,7 @@ class User(Base):
 
 
 class Connection(Base):
-    """An external account authorized by a Jiraya user.
-
-    credential_ciphertext contains encrypted provider OAuth credentials. Public account
-    metadata and granted scopes remain queryable without decrypting the token payload.
-    """
+    """An external account authorized by a Jiraya user."""
 
     __tablename__ = "connections"
     __table_args__ = (

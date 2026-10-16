@@ -39,6 +39,14 @@ def _frontend_redirect(*, status: str, provider: str, detail: str | None = None)
     return RedirectResponse(f"{settings.frontend_base_url}/?{urlencode(query)}", status_code=302)
 
 
+def _safe_oauth_error(exc: Exception) -> str:
+    """Expose Jiraya-owned configuration errors without leaking provider payloads."""
+    if isinstance(exc, RuntimeError):
+        text = str(exc).strip()
+        return text[:300] if text else "RuntimeError"
+    return type(exc).__name__
+
+
 @router.get("")
 def list_connections(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
@@ -191,7 +199,7 @@ def google_connection_callback(
         return _frontend_redirect(
             status="error",
             provider="google",
-            detail=type(exc).__name__,
+            detail=_safe_oauth_error(exc),
         )
 
     return _frontend_redirect(status="connected", provider="google")

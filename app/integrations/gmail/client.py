@@ -93,16 +93,17 @@ class GmailClient:
         return max(messages, key=lambda item: item.internal_date_ms)
 
     def get_latest_inbox(self) -> GmailMessage | None:
-        """Newest incoming inbox message regardless of read state.
-
-        Manual debug/test controls should be stable even when the user has already opened
-        the message in Gmail. The automatic runtime does not use this helper; it consumes
-        exact Gmail history message IDs instead.
-        """
+        """Newest incoming inbox message regardless of read state."""
         return self._latest_for_query("in:inbox")
 
     def get_latest_unread_inbox(self) -> GmailMessage | None:
-        return self._latest_for_query("is:unread in:inbox")
+        """Compatibility helper used by older/manual flows.
+
+        Manual debug controls should continue targeting the newest inbox message even if
+        the user opened it in Gmail between receiving it and pressing Debug. The automatic
+        runtime consumes exact history message IDs and does not depend on this helper.
+        """
+        return self.get_latest_inbox()
 
     def get_thread_messages(self, thread_id: str) -> list[GmailMessage]:
         raw_thread = (

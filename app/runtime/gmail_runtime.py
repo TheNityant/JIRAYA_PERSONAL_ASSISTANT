@@ -42,14 +42,20 @@ class GmailRuntimeService:
         return f"gmail-history:{self.settings.dev_user_id}"
 
     def poll(self) -> dict:
+        watch_error: str | None = None
         if self.settings.gmail_pubsub_topic_name and self.settings.gmail_watch_auto_register:
-            self.ensure_watch()
+            try:
+                self.ensure_watch()
+            except Exception as exc:
+                # Pub/Sub is an acceleration path. A bad topic/config must never disable
+                # the local history monitor that provides the same semantics.
+                watch_error = type(exc).__name__
 
         profile = self.gmail.get_profile()
         current_history_id = str(profile.get("historyId") or "")
         email_address = str(profile.get("emailAddress") or "")
         if not current_history_id:
-            return {"decision": "NO_HISTORY_ID", "processed": 0}
+            return {"decision": "NO_HISTORY_ID", "processed": 0, "watch_error": watch_error}
 
         state = self.state.get(self.cursor_key)
         if not state or not state.get("history_id"):
@@ -65,6 +71,7 @@ class GmailRuntimeService:
                 "decision": "CURSOR_INITIALIZED",
                 "processed": 0,
                 "history_id": current_history_id,
+                "watch_error": watch_error,
             }
 
         if str(state["history_id"]) == current_history_id:
@@ -72,9 +79,13 @@ class GmailRuntimeService:
                 "decision": "NO_CHANGE",
                 "processed": 0,
                 "history_id": current_history_id,
+                "watch_error": watch_error,
             }
 
-        return self.consume_history(target_history_id=current_history_id, email_address=email_address)
+        result = self.consume_history(target_history_id=current_history_id, email_address=email_address)
+        if watch_error:
+            result["watch_error"] = watch_error
+        return result
 
     def ensure_watch(self) -> dict | None:
         """Renew the Gmail watch when it is absent or within 24 hours of expiry."""
@@ -96,7 +107,6 @@ class GmailRuntimeService:
         watch_history = str(watch.get("historyId") or profile.get("historyId") or "")
         next_state = {
             **state,
-            # Never advance a valid processing cursor merely because a watch was renewed.
             "history_id": existing_cursor or watch_history,
             "email_address": profile.get("emailAddress") or state.get("email_address") or "",
             "watch_expiration": watch.get("expiration"),

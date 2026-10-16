@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.automation.executor import AutomationExecutor
+from app.automation.reliable_executor import ReliableAutomationExecutor
 from app.config import get_settings
 from app.db import get_db
 from app.integrations.gmail.connection import get_gmail_client
@@ -22,9 +22,9 @@ class ApprovalRequest(BaseModel):
     draft_body: str | None = None
 
 
-def _executor(db: Session) -> AutomationExecutor:
+def _executor(db: Session) -> ReliableAutomationExecutor:
     settings = get_settings()
-    return AutomationExecutor(
+    return ReliableAutomationExecutor(
         settings=settings,
         db=db,
         provider=NebiusProvider(settings),
@@ -81,7 +81,7 @@ def get_automation_execution(
     execution = AutomationExecutionStore(db).get(execution_id)
     if execution is None:
         raise HTTPException(status_code=404, detail="Automation execution not found")
-    return AutomationExecutor.execution_payload(execution)
+    return ReliableAutomationExecutor.execution_payload(execution)
 
 
 @router.get("/automation-executions")
@@ -90,4 +90,4 @@ def list_automation_executions(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     items = AutomationExecutionStore(db).list_recent(automation_id=automation_id)
-    return [AutomationExecutor.execution_payload(item) for item in items]
+    return [ReliableAutomationExecutor.execution_payload(item) for item in items]

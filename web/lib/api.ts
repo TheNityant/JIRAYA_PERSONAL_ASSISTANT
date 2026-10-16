@@ -19,6 +19,47 @@ export type AutomationInput = Omit<
   "id" | "system_pipeline" | "created_at" | "updated_at"
 >;
 
+export type AutomationExecution = {
+  id: string;
+  automation_id: string;
+  correlation_id: string;
+  source: string;
+  source_event_id: string;
+  source_thread_id: string | null;
+  action_type: string;
+  approval_policy: "REQUIRED" | "DRAFT_ONLY" | "AUTO";
+  status: string;
+  match_result: Record<string, unknown>;
+  draft_body: string;
+  output: Record<string, unknown>;
+  action_id: string | null;
+  created_at: string;
+  updated_at: string;
+  executed_at: string | null;
+};
+
+export type AutomationRunResponse = {
+  decision: string;
+  automation_id?: string;
+  action_id?: string;
+  verification_status?: string;
+  reason?: string;
+  message?: {
+    id: string;
+    thread_id: string;
+    from: string;
+    subject: string;
+    body_preview: string;
+  };
+  match?: {
+    matches: boolean;
+    confidence: number;
+    reason: string;
+    deterministic_checks: Record<string, boolean>;
+  };
+  execution?: AutomationExecution;
+};
+
 export type ConnectionCatalogItem = {
   id: string;
   provider: string;
@@ -77,6 +118,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message_id: messageId || null }),
     }),
+  runGmailAutomation: (id: string, messageId?: string, force = false) =>
+    request<AutomationRunResponse>(`/automations/${id}/run/gmail`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId || null, force }),
+    }),
+  approveExecution: (executionId: string, draftBody?: string) =>
+    request<AutomationRunResponse>(`/automation-executions/${executionId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ draft_body: draftBody ?? null }),
+    }),
+  getExecution: (executionId: string) =>
+    request<AutomationExecution>(`/automation-executions/${executionId}`),
+  listExecutions: (automationId?: string) =>
+    request<AutomationExecution[]>(
+      `/automation-executions${automationId ? `?automation_id=${encodeURIComponent(automationId)}` : ""}`,
+    ),
   listConnections: () => request<ConnectionsResponse>("/connections"),
   disconnectGoogle: () =>
     request<{ disconnected: boolean; provider: string }>("/connections/google/disconnect", {

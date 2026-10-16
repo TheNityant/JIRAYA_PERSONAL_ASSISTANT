@@ -37,6 +37,47 @@ class ObligationStore:
         )
         return self.db.scalars(statement).first()
 
+    def create_from_source_email(
+        self,
+        *,
+        action: Action,
+        message_id: str,
+        thread_id: str,
+        internal_date_ms: int,
+        title: str,
+        description: str,
+        confidence: float,
+    ) -> Obligation:
+        existing = self.for_action_trigger(action_id=action.id, trigger_message_id=message_id)
+        if existing:
+            return existing
+        now = datetime.now(timezone.utc)
+        obligation = Obligation(
+            obligation_type="NEW_OBLIGATION",
+            source="gmail",
+            source_entity_id=action.source_entity_id,
+            related_action_id=action.id,
+            external_thread_id=thread_id or action.external_thread_id,
+            trigger_message_id=message_id,
+            status=OPEN_STATUS,
+            title=title or "Follow-up required",
+            description=description,
+            context={
+                "latest_classification": "NEW_OBLIGATION",
+                "trigger_message_id": message_id,
+                "trigger_internal_date_ms": internal_date_ms,
+                "source": "initial_email",
+                "confidence": confidence,
+            },
+            resolution={},
+            created_at=now,
+            updated_at=now,
+        )
+        self.db.add(obligation)
+        self.db.commit()
+        self.db.refresh(obligation)
+        return obligation
+
     def upsert_from_reconciliation(
         self,
         *,
@@ -49,7 +90,6 @@ class ObligationStore:
     ) -> Obligation:
         exact = self.for_action_trigger(action_id=action.id, trigger_message_id=message_id)
         if exact and exact.status in TERMINAL_STATUSES:
-            # Backfill/replay must never reopen a trigger that was already resolved.
             return exact
 
         existing = self.open_for_action(action.id)

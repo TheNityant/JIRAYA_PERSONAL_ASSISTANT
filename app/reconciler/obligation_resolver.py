@@ -9,6 +9,9 @@ from app.models import Obligation
 from app.providers.base import ModelProvider
 
 
+OBLIGATION_RESOLVER_VERSION = 2
+
+
 class ObligationResolutionDecision(BaseModel):
     resolves: bool
     confidence: float = Field(ge=0.0, le=1.0)

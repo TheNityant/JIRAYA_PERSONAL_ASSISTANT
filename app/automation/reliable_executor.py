@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 
 from app.automation.executor import AutomationExecutor
 from app.models import AutomationExecution
-from app.reconciler.obligation_resolver import ObligationResolver
+from app.reconciler.obligation_resolver import (
+    OBLIGATION_RESOLVER_VERSION,
+    ObligationResolver,
+)
 
 
 class ReliableAutomationExecutor(AutomationExecutor):
@@ -56,6 +59,7 @@ class ReliableAutomationExecutor(AutomationExecutor):
             resolves=semantic.resolves,
             confidence=semantic.confidence,
             reason=semantic.reason,
+            resolver_version=OBLIGATION_RESOLVER_VERSION,
         )
         if not semantic.resolves:
             return result
@@ -78,6 +82,7 @@ class ReliableAutomationExecutor(AutomationExecutor):
                 "body_preview": sent_message.body[:2000],
                 "internal_date_ms": sent_message.internal_date_ms,
                 "semantic_resolution": semantic.model_dump(),
+                "resolver_version": OBLIGATION_RESOLVER_VERSION,
             },
             resolving_action_id=action_id,
         )
@@ -100,6 +105,7 @@ class ReliableAutomationExecutor(AutomationExecutor):
             metadata={
                 "resolution_status": "RESOLVED_BY_AGENT",
                 "sent_message_id": sent_message.id,
+                "resolver_version": OBLIGATION_RESOLVER_VERSION,
             },
         )
         self.ledger.append(
@@ -112,6 +118,7 @@ class ReliableAutomationExecutor(AutomationExecutor):
                 "action_id": action_id,
                 "resolving_message_id": sent_message.id,
                 "semantic_resolution": semantic.model_dump(),
+                "resolver_version": OBLIGATION_RESOLVER_VERSION,
             },
         )
         result["obligation_status"] = obligation.status

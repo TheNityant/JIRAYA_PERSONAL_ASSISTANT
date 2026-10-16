@@ -14,6 +14,19 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_error(exc: Exception) -> str:
+    """Return a useful diagnostic without ever dumping provider payloads/tokens.
+
+    RuntimeError messages in Jiraya's credential/connection layer are deliberately
+    human-readable and contain no secret values. For all other exception classes we
+    expose only the class name.
+    """
+    if isinstance(exc, RuntimeError):
+        text = str(exc).strip()
+        return text[:500] if text else "RuntimeError"
+    return type(exc).__name__
+
+
 async def gmail_monitor_loop(settings: Settings) -> None:
     """Continuously consume Gmail history during local/server runtime.
 
@@ -50,7 +63,7 @@ async def gmail_monitor_loop(settings: Settings) -> None:
                                 "last_poll_at": _now_iso(),
                                 "last_status": "ERROR",
                                 "last_decision": None,
-                                "last_error": type(exc).__name__,
+                                "last_error": _safe_error(exc),
                             },
                         )
                         raise
@@ -59,8 +72,8 @@ async def gmail_monitor_loop(settings: Settings) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            # Do not crash FastAPI, but do make the failed monitor visible in normal logs
-            # and through /runtime/gmail/status. Never log credential values.
-            logger.warning("Gmail background monitor cycle failed: %s", type(exc).__name__)
+            # Do not crash FastAPI, but make Jiraya-owned RuntimeError reasons visible.
+            # Other provider/library failures expose only their exception type.
+            logger.warning("Gmail background monitor cycle failed: %s", _safe_error(exc))
 
         await asyncio.sleep(settings.gmail_background_poll_seconds)

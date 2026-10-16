@@ -4,6 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Automation
+from app.services.automation_execution_store import AutomationExecutionStore
+from app.services.notification_store import NotificationStore
 
 
 DEFAULT_SYSTEM_PIPELINE = [
@@ -15,6 +17,16 @@ DEFAULT_SYSTEM_PIPELINE = [
     {"type": "RECONCILIATOR", "label": "Reconciliator"},
     {"type": "OBLIGATION", "label": "Obligation lifecycle"},
 ]
+
+RUNTIME_LOGIC_FIELDS = {
+    "enabled",
+    "source",
+    "trigger_type",
+    "match_config",
+    "context_config",
+    "action_config",
+    "approval_policy",
+}
 
 
 class AutomationStore:
@@ -67,6 +79,7 @@ class AutomationStore:
         return list(self.db.scalars(statement).all())
 
     def update(self, automation: Automation, values: dict) -> Automation:
+        runtime_logic_changed = bool(RUNTIME_LOGIC_FIELDS.intersection(values))
         for key in (
             "name",
             "description",
@@ -84,6 +97,18 @@ class AutomationStore:
         self.db.add(automation)
         self.db.commit()
         self.db.refresh(automation)
+
+        if runtime_logic_changed:
+            # A pending draft belongs to the old configuration. Do not let it make a newly
+            # saved AUTO policy appear to still be waiting for approval.
+            superseded = AutomationExecutionStore(self.db).supersede_pending_for_automation(
+                automation.id
+            )
+            if superseded:
+                NotificationStore(self.db).mark_automation_attention_read(
+                    automation_id=automation.id
+                )
+
         return automation
 
     def delete(self, automation: Automation) -> None:

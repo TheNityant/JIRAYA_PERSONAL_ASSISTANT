@@ -129,17 +129,24 @@ export type Obligation = {
 
 export type GmailRuntimeStatus = {
   background_monitor_enabled: boolean;
+  background_monitor_configured?: boolean;
   poll_seconds: number;
   pubsub_configured: boolean;
   pubsub_topic: string | null;
+  web_oauth_configured?: boolean;
   history_cursor: string | null;
   mailbox: string | null;
+  last_poll_at?: string | null;
+  last_poll_status?: string | null;
+  last_poll_decision?: string | null;
+  last_error?: string | null;
 };
 
 export const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
+    cache: "no-store",
     ...init,
     headers: {
       "Content-Type": "application/json",

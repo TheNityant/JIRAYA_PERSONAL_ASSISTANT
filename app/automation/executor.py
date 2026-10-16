@@ -3,8 +3,10 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from app.automation.action_router import AutomationActionRouter
 from app.automation.draft_generator import DraftReplyGenerator
 from app.automation.matcher import AutomationMatcher
+from app.automation.obligation_extractor import ObligationExtractor
 from app.config import Settings
 from app.integrations.gmail.client import GmailClient
 from app.models import Automation, AutomationExecution
@@ -12,6 +14,8 @@ from app.providers.base import ModelProvider
 from app.services.action_store import ActionStore
 from app.services.automation_execution_store import AutomationExecutionStore
 from app.services.event_ledger import EventLedger
+from app.services.notification_store import NotificationStore
+from app.services.obligation_store import ObligationStore
 from app.verifier.gmail_verifier import GmailVerifier
 
 
@@ -31,9 +35,13 @@ class AutomationExecutor:
         self.provider = provider
         self.gmail = gmail
         self.matcher = AutomationMatcher(provider)
+        self.router = AutomationActionRouter(provider)
         self.generator = DraftReplyGenerator(provider)
+        self.obligation_extractor = ObligationExtractor(provider)
         self.executions = AutomationExecutionStore(db)
         self.actions = ActionStore(db)
+        self.obligations = ObligationStore(db)
+        self.notifications = NotificationStore(db)
         self.ledger = EventLedger(db)
         self.verifier = GmailVerifier(gmail)
 
@@ -127,6 +135,18 @@ class AutomationExecutor:
                     "email_from": message.sender,
                 },
             )
+            self.notifications.create_once(
+                user_id=self.settings.dev_user_id,
+                category="INFORMATION",
+                severity="INFO",
+                title=automation.name,
+                message=f"{message.subject}: {match.reason}",
+                source="automation",
+                source_entity_id=entity_id,
+                automation_id=automation.id,
+                dedupe_key=f"notify:{automation.id}:{message.id}",
+                metadata={"execution_id": execution.id, "email_from": message.sender},
+            )
             self.ledger.append(
                 source="automation",
                 event_type="AUTOMATION_NOTIFICATION_READY",
@@ -149,18 +169,75 @@ class AutomationExecutor:
                 "action_type": action_type,
             }
 
+        effective_policy = automation.approval_policy
+        route_payload: dict | None = None
+        if automation.approval_policy == "AUTO":
+            try:
+                route = self.router.route(automation=automation, message=message)
+                route_payload = route.model_dump()
+            except Exception as exc:
+                route_payload = {
+                    "decision": "NOTIFY_ONLY",
+                    "confidence": 0.0,
+                    "reason": f"Action-safety routing failed: {type(exc).__name__}",
+                }
+
+            if route_payload["decision"] == "NOTIFY_ONLY":
+                execution = self.executions.create(
+                    automation_id=automation.id,
+                    correlation_id=correlation_id,
+                    source_event_id=message.id,
+                    source_thread_id=message.thread_id,
+                    action_type=action_type,
+                    approval_policy="AUTO",
+                    status="FALLBACK_NOTIFICATION",
+                    match_result=match_payload,
+                    output={
+                        "recipient": message.reply_to or message.sender,
+                        "subject": message.subject,
+                        "action_route": route_payload,
+                    },
+                )
+                self.notifications.create_once(
+                    user_id=self.settings.dev_user_id,
+                    category="ACTION_REQUIRED",
+                    severity="WARNING",
+                    title=f"Jiraya paused: {automation.name}",
+                    message=route_payload["reason"],
+                    source="automation",
+                    source_entity_id=entity_id,
+                    automation_id=automation.id,
+                    dedupe_key=f"fallback:{automation.id}:{message.id}",
+                    metadata={
+                        "execution_id": execution.id,
+                        "email_subject": message.subject,
+                        "email_from": message.sender,
+                        "route": route_payload,
+                    },
+                )
+                return {
+                    "decision": "FALLBACK_NOTIFICATION",
+                    "automation_id": automation.id,
+                    "message": self._message_payload(message),
+                    "match": match_payload,
+                    "action_route": route_payload,
+                    "execution": self.execution_payload(execution),
+                }
+            if route_payload["decision"] == "REQUIRE_APPROVAL":
+                effective_policy = "REQUIRED"
+
         draft_body = self.generator.generate(automation=automation, message=message)
-        if automation.approval_policy == "DRAFT_ONLY":
+        if effective_policy == "DRAFT_ONLY":
             status = "DRAFT_READY"
-        elif automation.approval_policy == "REQUIRED":
+        elif effective_policy == "REQUIRED":
             status = "AWAITING_APPROVAL"
-        elif automation.approval_policy == "AUTO":
+        elif effective_policy == "AUTO":
             status = "AUTO_PENDING"
         else:
             return {
                 "decision": "UNSUPPORTED_APPROVAL_POLICY",
                 "automation_id": automation.id,
-                "approval_policy": automation.approval_policy,
+                "approval_policy": effective_policy,
             }
 
         execution = self.executions.create(
@@ -169,13 +246,15 @@ class AutomationExecutor:
             source_event_id=message.id,
             source_thread_id=message.thread_id,
             action_type=action_type,
-            approval_policy=automation.approval_policy,
+            approval_policy=effective_policy,
             status=status,
             match_result=match_payload,
             draft_body=draft_body,
             output={
                 "recipient": message.reply_to or message.sender,
                 "subject": message.subject,
+                "configured_approval_policy": automation.approval_policy,
+                "action_route": route_payload,
             },
         )
         self.ledger.append(
@@ -186,12 +265,13 @@ class AutomationExecutor:
             payload={
                 "automation_id": automation.id,
                 "execution_id": execution.id,
-                "approval_policy": automation.approval_policy,
+                "approval_policy": effective_policy,
                 "recipient": message.reply_to or message.sender,
+                "action_route": route_payload,
             },
         )
 
-        if automation.approval_policy == "AUTO":
+        if effective_policy == "AUTO":
             if not self.settings.enable_external_actions:
                 execution = self.executions.update(
                     execution,
@@ -200,6 +280,14 @@ class AutomationExecutor:
                         **(execution.output or {}),
                         "reason": "ENABLE_EXTERNAL_ACTIONS is false",
                     },
+                )
+                self._notify_action_required(
+                    automation=automation,
+                    message=message,
+                    execution=execution,
+                    title=f"Automatic reply blocked: {automation.name}",
+                    text="External actions are disabled, so Jiraya prepared the reply but did not send it.",
+                    dedupe_key=f"blocked:{execution.id}",
                 )
                 return {
                     "decision": "BLOCKED_BY_POLICY",
@@ -210,12 +298,35 @@ class AutomationExecutor:
                 }
             return self._send(execution=execution, message=message)
 
-        decision = "DRAFT_READY" if automation.approval_policy == "DRAFT_ONLY" else "AWAITING_APPROVAL"
+        if effective_policy == "REQUIRED":
+            self._notify_action_required(
+                automation=automation,
+                message=message,
+                execution=execution,
+                title=f"Draft ready: {automation.name}",
+                text="Jiraya prepared a reply and is waiting for your approval.",
+                dedupe_key=f"approval:{execution.id}",
+            )
+        elif effective_policy == "DRAFT_ONLY":
+            self.notifications.create_once(
+                user_id=self.settings.dev_user_id,
+                category="INFORMATION",
+                title=f"Draft prepared: {automation.name}",
+                message=f"A draft was prepared for {message.subject}. Draft-only policy prevents sending.",
+                source="automation",
+                source_entity_id=entity_id,
+                automation_id=automation.id,
+                dedupe_key=f"draft:{execution.id}",
+                metadata={"execution_id": execution.id},
+            )
+
+        decision = "DRAFT_READY" if effective_policy == "DRAFT_ONLY" else "AWAITING_APPROVAL"
         return {
             "decision": decision,
             "automation_id": automation.id,
             "message": self._message_payload(message),
             "match": match_payload,
+            "action_route": route_payload,
             "execution": self.execution_payload(execution),
         }
 
@@ -247,6 +358,7 @@ class AutomationExecutor:
     def _send(self, *, execution: AutomationExecution, message) -> dict:
         recipient = message.reply_to or message.sender
         entity_id = f"gmail:{message.id}"
+        automation = self.db.get(Automation, execution.automation_id)
         try:
             sent = self.gmail.send_reply(source=message, body_text=execution.draft_body)
         except Exception as exc:
@@ -263,6 +375,15 @@ class AutomationExecutor:
                 correlation_id=execution.correlation_id,
                 payload={"execution_id": execution.id, "error_type": type(exc).__name__},
             )
+            if automation:
+                self._notify_action_required(
+                    automation=automation,
+                    message=message,
+                    execution=execution,
+                    title=f"Reply failed: {automation.name}",
+                    text="Jiraya could not send the configured reply. Review the connection and try again.",
+                    dedupe_key=f"send-failed:{execution.id}",
+                )
             return {"decision": "EXECUTION_FAILED", "execution": self.execution_payload(execution)}
 
         sent_event = self.ledger.append(
@@ -313,12 +434,97 @@ class AutomationExecutor:
             action_id=action.id,
             executed_at=sent_event.occurred_at,
         )
+
+        obligation = None
+        if verification.status == "VERIFIED_SUCCESS":
+            if automation:
+                self.notifications.create_once(
+                    user_id=self.settings.dev_user_id,
+                    category="AUTOMATION_EXECUTED",
+                    severity="SUCCESS",
+                    title=f"Reply sent: {automation.name}",
+                    message=f"Jiraya replied to {recipient} about {message.subject} and Gmail verified the send.",
+                    source="automation",
+                    source_entity_id=entity_id,
+                    automation_id=automation.id,
+                    action_id=action.id,
+                    dedupe_key=f"sent:{execution.id}",
+                    metadata={"execution_id": execution.id, "sent_message_id": sent["id"]},
+                )
+            try:
+                extracted = self.obligation_extractor.extract(message=message)
+                if extracted.creates_obligation:
+                    obligation = self.obligations.create_from_source_email(
+                        action=action,
+                        message_id=message.id,
+                        thread_id=message.thread_id,
+                        internal_date_ms=message.internal_date_ms,
+                        title=extracted.title,
+                        description=extracted.description,
+                        confidence=extracted.confidence,
+                    )
+                    self.notifications.create_once(
+                        user_id=self.settings.dev_user_id,
+                        category="ACTION_REQUIRED",
+                        severity="WARNING",
+                        title=obligation.title,
+                        message=obligation.description or "This email created work that remains outstanding.",
+                        source="obligation",
+                        source_entity_id=entity_id,
+                        automation_id=automation.id if automation else None,
+                        action_id=action.id,
+                        obligation_id=obligation.id,
+                        dedupe_key=f"obligation-open:{obligation.id}",
+                        metadata={"status": obligation.status},
+                    )
+            except Exception:
+                # Obligation extraction is helpful but must never turn a verified send into a failure.
+                obligation = None
+        elif automation:
+            self._notify_action_required(
+                automation=automation,
+                message=message,
+                execution=execution,
+                title=f"Reply needs verification: {automation.name}",
+                text=f"Gmail send verification returned {verification.status}.",
+                dedupe_key=f"verification:{execution.id}",
+            )
+
         return {
             "decision": "SENT",
             "verification_status": verification.status,
             "action_id": action.id,
+            "obligation_id": obligation.id if obligation else None,
             "execution": self.execution_payload(execution),
         }
+
+    def _notify_action_required(
+        self,
+        *,
+        automation: Automation,
+        message,
+        execution: AutomationExecution,
+        title: str,
+        text: str,
+        dedupe_key: str,
+    ) -> None:
+        self.notifications.create_once(
+            user_id=self.settings.dev_user_id,
+            category="ACTION_REQUIRED",
+            severity="WARNING",
+            title=title,
+            message=text,
+            source="automation",
+            source_entity_id=f"gmail:{message.id}",
+            automation_id=automation.id,
+            action_id=execution.action_id,
+            dedupe_key=dedupe_key,
+            metadata={
+                "execution_id": execution.id,
+                "email_subject": message.subject,
+                "email_from": message.sender,
+            },
+        )
 
     @staticmethod
     def execution_payload(execution: AutomationExecution) -> dict:

@@ -37,6 +37,7 @@ def init_db() -> None:
     from app.models import (  # noqa: F401
         Action,
         Automation,
+        AutomationExecution,
         Connection,
         Event,
         OAuthState,

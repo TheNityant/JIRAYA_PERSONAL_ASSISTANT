@@ -40,8 +40,10 @@ def init_db() -> None:
         AutomationExecution,
         Connection,
         Event,
+        Notification,
         OAuthState,
         Obligation,
+        RuntimeState,
         User,
     )
 

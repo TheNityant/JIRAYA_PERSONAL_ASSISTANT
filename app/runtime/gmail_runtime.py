@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
@@ -10,17 +12,14 @@ from app.integrations.gmail.models import GmailMessage
 from app.providers.nebius import NebiusProvider
 from app.services.action_store import ActionStore
 from app.services.automation_store import AutomationStore
+from app.services.connection_store import ConnectionStore
 from app.services.notification_store import NotificationStore
 from app.services.runtime_state_store import RuntimeStateStore
 from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
 
 
 class GmailRuntimeService:
-    """Consume Gmail history and route events into execution/reconciliation.
-
-    Local polling and Pub/Sub pushes both enter through this class, so automatic behavior
-    is identical regardless of how Jiraya was woken up.
-    """
+    """Consume Gmail history and route events into execution/reconciliation."""
 
     def __init__(self, *, db: Session, settings: Settings):
         self.db = db
@@ -43,6 +42,9 @@ class GmailRuntimeService:
         return f"gmail-history:{self.settings.dev_user_id}"
 
     def poll(self) -> dict:
+        if self.settings.gmail_pubsub_topic_name and self.settings.gmail_watch_auto_register:
+            self.ensure_watch()
+
         profile = self.gmail.get_profile()
         current_history_id = str(profile.get("historyId") or "")
         email_address = str(profile.get("emailAddress") or "")
@@ -53,7 +55,11 @@ class GmailRuntimeService:
         if not state or not state.get("history_id"):
             self.state.set(
                 self.cursor_key,
-                {"history_id": current_history_id, "email_address": email_address},
+                {
+                    **(state or {}),
+                    "history_id": current_history_id,
+                    "email_address": email_address,
+                },
             )
             return {
                 "decision": "CURSOR_INITIALIZED",
@@ -70,6 +76,48 @@ class GmailRuntimeService:
 
         return self.consume_history(target_history_id=current_history_id, email_address=email_address)
 
+    def ensure_watch(self) -> dict | None:
+        """Renew the Gmail watch when it is absent or within 24 hours of expiry."""
+        if not self.settings.gmail_pubsub_topic_name:
+            return None
+        state = self.state.get(self.cursor_key) or {}
+        expiration_raw = state.get("watch_expiration")
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        try:
+            expiration_ms = int(expiration_raw or 0)
+        except (TypeError, ValueError):
+            expiration_ms = 0
+        if expiration_ms > now_ms + 24 * 60 * 60 * 1000:
+            return None
+
+        watch = self.gmail.register_watch(topic_name=self.settings.gmail_pubsub_topic_name)
+        profile = self.gmail.get_profile()
+        existing_cursor = str(state.get("history_id") or "")
+        watch_history = str(watch.get("historyId") or profile.get("historyId") or "")
+        next_state = {
+            **state,
+            # Never advance a valid processing cursor merely because a watch was renewed.
+            "history_id": existing_cursor or watch_history,
+            "email_address": profile.get("emailAddress") or state.get("email_address") or "",
+            "watch_expiration": watch.get("expiration"),
+            "pubsub_topic": self.settings.gmail_pubsub_topic_name,
+        }
+        self.state.set(self.cursor_key, next_state)
+
+        connection = ConnectionStore(self.db).get_active(
+            user_id=self.settings.dev_user_id,
+            provider="google",
+        )
+        if connection:
+            ConnectionStore(self.db).update_metadata(
+                connection,
+                {
+                    "gmail_watch_expiration": watch.get("expiration"),
+                    "gmail_pubsub_topic": self.settings.gmail_pubsub_topic_name,
+                },
+            )
+        return watch
+
     def consume_history(self, *, target_history_id: str | None = None, email_address: str | None = None) -> dict:
         state = self.state.get(self.cursor_key)
         if not state or not state.get("history_id"):
@@ -78,6 +126,7 @@ class GmailRuntimeService:
             self.state.set(
                 self.cursor_key,
                 {
+                    **(state or {}),
                     "history_id": history_id,
                     "email_address": str(profile.get("emailAddress") or email_address or ""),
                 },
@@ -96,6 +145,7 @@ class GmailRuntimeService:
                 self.state.set(
                     self.cursor_key,
                     {
+                        **state,
                         "history_id": reset_id,
                         "email_address": str(profile.get("emailAddress") or email_address or ""),
                         "resynced": True,
@@ -122,10 +172,15 @@ class GmailRuntimeService:
         messages.sort(key=lambda item: item.internal_date_ms)
 
         results = [self.process_message(message) for message in messages]
-        final_history_id = str(target_history_id or newest_history_id or start_history_id)
+        candidates = [value for value in (newest_history_id, target_history_id) if value]
+        try:
+            final_history_id = str(max(int(value) for value in candidates)) if candidates else start_history_id
+        except ValueError:
+            final_history_id = str(newest_history_id or target_history_id or start_history_id)
         self.state.set(
             self.cursor_key,
             {
+                **state,
                 "history_id": final_history_id,
                 "email_address": email_address or state.get("email_address") or "",
             },
@@ -138,8 +193,6 @@ class GmailRuntimeService:
         }
 
     def process_message(self, message: GmailMessage) -> dict:
-        # Existing verified actions own subsequent events in their Gmail thread. They go
-        # through reconciliation rather than blindly repeating the original automation.
         action = self.actions.latest_verified_for_thread(message.thread_id)
         if action is not None and message.id != (action.context or {}).get("source_message_id"):
             reconciliation = GmailReconciliationWorkflow(
@@ -155,8 +208,6 @@ class GmailRuntimeService:
                 "result": reconciliation,
             }
 
-        # Outgoing messages that are not part of a tracked action should never trigger
-        # incoming-mail automations.
         if "SENT" in message.labels:
             return {
                 "message_id": message.id,
@@ -178,7 +229,6 @@ class GmailRuntimeService:
                 "AUTOMATION_DISABLED",
                 "UNSUPPORTED_TRIGGER",
             }:
-                # At most one reply-producing automation can own one incoming message.
                 reply_claimed = True
 
         return {
@@ -220,6 +270,3 @@ class GmailRuntimeService:
                 dedupe_key=f"reconcile:{action_id}:{(result.get('later_message') or {}).get('message_id')}:{classification}",
                 metadata={"classification": classification},
             )
-        elif decision == "OBLIGATION_STILL_OPEN":
-            # Avoid noisy repeats; the open obligation remains visible in its own screen.
-            return

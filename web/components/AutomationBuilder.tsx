@@ -18,6 +18,9 @@ import {
   AutomationInput,
   AutomationRunResponse,
   ConnectionCatalogItem,
+  GmailRuntimeStatus,
+  JirayaNotification,
+  Obligation,
 } from "@/lib/api";
 
 const emptyAutomation: AutomationInput = {
@@ -38,8 +41,20 @@ const emptyAutomation: AutomationInput = {
   approval_policy: "REQUIRED",
 };
 
+type View = "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS";
+
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function nice(value: string): string {
+  return value.toLowerCase().replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+function when(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
 }
 
 function buildNodes(draft: AutomationInput): Node[] {
@@ -74,6 +89,7 @@ function buildNodes(draft: AutomationInput): Node[] {
 }
 
 export default function AutomationBuilder() {
+  const [activeView, setActiveView] = useState<View>("AUTOMATIONS");
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [selected, setSelected] = useState<Automation | null>(null);
   const [draft, setDraft] = useState<AutomationInput>(emptyAutomation);
@@ -82,6 +98,12 @@ export default function AutomationBuilder() {
   const [runResult, setRunResult] = useState<AutomationRunResponse | null>(null);
   const [executionDraft, setExecutionDraft] = useState("");
   const [connections, setConnections] = useState<ConnectionCatalogItem[]>([]);
+  const [notifications, setNotifications] = useState<JirayaNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationFilter, setNotificationFilter] = useState("ALL");
+  const [obligations, setObligations] = useState<Obligation[]>([]);
+  const [obligationFilter, setObligationFilter] = useState<"OPEN" | "RESOLVED">("OPEN");
+  const [runtime, setRuntime] = useState<GmailRuntimeStatus | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(buildNodes(emptyAutomation));
 
   async function refresh(preferredId?: string) {
@@ -97,8 +119,20 @@ export default function AutomationBuilder() {
     setConnections(response.catalog);
   }
 
+  async function refreshOperations() {
+    const [notificationResponse, obligationResponse, runtimeResponse] = await Promise.all([
+      api.listNotifications(),
+      api.listObligations(),
+      api.gmailRuntimeStatus(),
+    ]);
+    setNotifications(notificationResponse.items);
+    setUnreadCount(notificationResponse.unread_count);
+    setObligations(obligationResponse);
+    setRuntime(runtimeResponse);
+  }
+
   useEffect(() => {
-    Promise.all([refresh(), refreshConnections()]).catch((error) =>
+    Promise.all([refresh(), refreshConnections(), refreshOperations()]).catch((error) =>
       setStatus(`Backend unavailable: ${error.message}`),
     );
 
@@ -113,6 +147,11 @@ export default function AutomationBuilder() {
       );
       window.history.replaceState({}, "", window.location.pathname);
     }
+
+    const timer = window.setInterval(() => {
+      refreshOperations().catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -162,6 +201,7 @@ export default function AutomationBuilder() {
       source,
       target,
       type: "smoothstep",
+      animated: true,
       markerEnd: { type: MarkerType.ArrowClosed },
     }));
   }, []);
@@ -213,7 +253,7 @@ export default function AutomationBuilder() {
 
   async function testLatestEmail() {
     if (!selected) return;
-    setStatus("Testing against latest unread Gmail...");
+    setStatus("Debug: testing latest unread Gmail...");
     try {
       const result = await api.previewGmail(selected.id);
       setPreview(result);
@@ -225,12 +265,13 @@ export default function AutomationBuilder() {
 
   async function runLatestEmail(force = false) {
     if (!selected) return;
-    setStatus("Running automation on latest unread Gmail...");
+    setStatus("Debug: running automation on latest Gmail...");
     try {
       const result = await api.runGmailAutomation(selected.id, undefined, force);
       setRunResult(result);
       setExecutionDraft(result.execution?.draft_body ?? "");
-      setStatus(`Execution: ${result.decision.toLowerCase().replaceAll("_", " ")}`);
+      setStatus(`Execution: ${nice(result.decision)}`);
+      await refreshOperations();
     } catch (error: any) {
       setStatus(`Execution failed: ${error.message}`);
     }
@@ -243,11 +284,8 @@ export default function AutomationBuilder() {
       const result = await api.approveExecution(runResult.execution.id, executionDraft);
       setRunResult(result);
       setExecutionDraft(result.execution?.draft_body ?? executionDraft);
-      setStatus(
-        result.verification_status
-          ? `Send result: ${result.verification_status}`
-          : `Approval: ${result.decision.toLowerCase().replaceAll("_", " ")}`,
-      );
+      setStatus(result.verification_status ? `Send result: ${result.verification_status}` : nice(result.decision));
+      await refreshOperations();
     } catch (error: any) {
       setStatus(`Approval failed: ${error.message}`);
     }
@@ -261,9 +299,7 @@ export default function AutomationBuilder() {
   }
 
   function connect(item: ConnectionCatalogItem) {
-    if (item.id === "gmail") {
-      window.location.href = api.googleConnectUrl();
-    }
+    if (item.id === "gmail") window.location.href = api.googleConnectUrl();
   }
 
   async function disconnectGoogle() {
@@ -273,14 +309,26 @@ export default function AutomationBuilder() {
     setStatus("Google disconnected");
   }
 
+  async function markRead(item: JirayaNotification) {
+    if (!item.read_at) await api.markNotificationRead(item.id);
+    await refreshOperations();
+  }
+
   const execution = runResult?.execution;
   const approvable =
     execution?.action_type === "DRAFT_REPLY" &&
     execution.approval_policy === "REQUIRED" &&
     ["AWAITING_APPROVAL", "BLOCKED_BY_POLICY"].includes(execution.status);
 
+  const filteredNotifications = notifications.filter(
+    (item) => notificationFilter === "ALL" || item.category === notificationFilter,
+  );
+  const filteredObligations = obligations.filter((item) =>
+    obligationFilter === "OPEN" ? item.status === "OPEN" : item.status !== "OPEN",
+  );
+
   return (
-    <main className="workspace">
+    <main className={`workspace ${activeView !== "AUTOMATIONS" ? "wide-view" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">J</div>
@@ -290,17 +338,25 @@ export default function AutomationBuilder() {
           </div>
         </div>
 
+        <nav className="primary-nav">
+          <button className={activeView === "AUTOMATIONS" ? "active" : ""} onClick={() => setActiveView("AUTOMATIONS")}>Automations</button>
+          <button className={activeView === "NOTIFICATIONS" ? "active" : ""} onClick={() => setActiveView("NOTIFICATIONS")}>
+            Notifications {unreadCount > 0 && <span className="nav-badge">{unreadCount}</span>}
+          </button>
+          <button className={activeView === "OBLIGATIONS" ? "active" : ""} onClick={() => setActiveView("OBLIGATIONS")}>Obligations</button>
+        </nav>
+
         <div className="sidebar-title-row">
           <span>Automations</span>
-          <button className="icon-button" onClick={() => selectAutomation(null)} title="New automation">+</button>
+          <button className="icon-button" onClick={() => { selectAutomation(null); setActiveView("AUTOMATIONS"); }} title="New automation">+</button>
         </div>
 
         <div className="automation-list">
           {automations.map((item) => (
             <button
               key={item.id}
-              className={`automation-list-item ${selected?.id === item.id ? "active" : ""}`}
-              onClick={() => selectAutomation(item)}
+              className={`automation-list-item ${selected?.id === item.id && activeView === "AUTOMATIONS" ? "active" : ""}`}
+              onClick={() => { selectAutomation(item); setActiveView("AUTOMATIONS"); }}
             >
               <span className={`status-dot ${item.enabled ? "on" : "off"}`} />
               <div>
@@ -312,14 +368,12 @@ export default function AutomationBuilder() {
           {!automations.length && (
             <button className="preset-card" onClick={createPreset}>
               <strong>Start with Internship Assistant</strong>
-              <span>Turn the current Gmail demo into an editable automation.</span>
+              <span>Create an editable Gmail automation.</span>
             </button>
           )}
         </div>
 
-        <div className="sidebar-title-row connections-heading">
-          <span>Connections</span>
-        </div>
+        <div className="sidebar-title-row connections-heading"><span>Connections</span></div>
         <div className="connection-list">
           {connections.map((item) => (
             <div className="connection-card" key={item.id}>
@@ -331,220 +385,144 @@ export default function AutomationBuilder() {
                 <button className="connection-action connected" onClick={disconnectGoogle}>Connected</button>
               ) : item.status === "AVAILABLE" ? (
                 <button className="connection-action" onClick={() => connect(item)}>Connect</button>
-              ) : (
-                <span className="connection-coming">Soon</span>
-              )}
+              ) : <span className="connection-coming">Soon</span>}
             </div>
           ))}
         </div>
 
         <div className="sidebar-footer">
           <span className="small-label">Runtime</span>
+          <strong className="runtime-line">
+            <span className={`status-dot ${runtime?.background_monitor_enabled ? "on" : "off"}`} />
+            {runtime?.background_monitor_enabled ? `Gmail monitoring · ${runtime.poll_seconds}s` : "Gmail monitor paused"}
+          </strong>
+          {runtime?.mailbox && <span className="runtime-mailbox">{runtime.mailbox}</span>}
           <strong>{status}</strong>
         </div>
       </aside>
 
-      <section className="canvas-shell">
-        <header className="topbar">
-          <div>
-            <span className="eyebrow">Automation Builder</span>
-            <h1>{draft.name}</h1>
-          </div>
-          <div className="topbar-actions">
-            {selected && <button className="secondary-button" onClick={testLatestEmail}>Test match</button>}
-            {selected && <button className="secondary-button" onClick={() => runLatestEmail(false)}>Run latest Gmail</button>}
-            <button className="primary-button" onClick={save}>{selected ? "Save changes" : "Create automation"}</button>
-          </div>
-        </header>
-
-        <div className="flow-area">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            nodesDraggable
-            fitView
-            fitViewOptions={{ padding: 0.18 }}
-            minZoom={0.45}
-            maxZoom={1.5}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={22} size={1} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-        </div>
-
-        {preview && (
-          <div className={`preview-strip ${preview.match?.matches ? "matched" : "not-matched"}`}>
-            <div>
-              <span className="small-label">Latest Gmail preview</span>
-              <strong>{preview.message?.subject ?? "No unread message"}</strong>
-            </div>
-            {preview.match && (
-              <div className="preview-result">
-                <strong>{preview.match.matches ? "MATCH" : "NO MATCH"}</strong>
-                <span>{Math.round(preview.match.confidence * 100)}% · {preview.match.reason}</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {runResult && (
-          <div className="execution-panel">
-            <div className="execution-header">
+      {activeView === "AUTOMATIONS" ? (
+        <>
+          <section className="canvas-shell">
+            <header className="topbar">
               <div>
-                <span className="small-label">Automation execution</span>
-                <strong>{runResult.decision.replaceAll("_", " ")}</strong>
+                <span className="eyebrow">Automation Builder</span>
+                <h1>{draft.name}</h1>
               </div>
-              {runResult.match && (
-                <span className="execution-confidence">
-                  {Math.round(runResult.match.confidence * 100)}% match
-                </span>
-              )}
+              <div className="topbar-actions">
+                {selected && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
+                {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>Debug · Run latest</button>}
+                <button className="primary-button" onClick={save}>{selected ? "Save changes" : "Create automation"}</button>
+              </div>
+            </header>
+
+            <div className="flow-area">
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                nodesDraggable
+                fitView
+                fitViewOptions={{ padding: 0.18 }}
+                minZoom={0.45}
+                maxZoom={1.5}
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background gap={22} size={1} />
+                <Controls showInteractive={false} />
+              </ReactFlow>
             </div>
 
-            {execution?.action_type === "DRAFT_REPLY" && (
-              <div className="draft-workspace">
-                <label>
-                  Generated reply
-                  <textarea
-                    rows={8}
-                    value={executionDraft}
-                    onChange={(event) => setExecutionDraft(event.target.value)}
-                    readOnly={execution.status === "VERIFIED_SUCCESS"}
-                  />
-                </label>
+            {preview && (
+              <div className={`preview-strip ${preview.match?.matches ? "matched" : "not-matched"}`}>
+                <div><span className="small-label">Debug preview</span><strong>{preview.message?.subject ?? "No unread message"}</strong></div>
+                {preview.match && <div className="preview-result"><strong>{preview.match.matches ? "MATCH" : "NO MATCH"}</strong><span>{Math.round(preview.match.confidence * 100)}% · {preview.match.reason}</span></div>}
+              </div>
+            )}
 
-                <div className="execution-actions">
-                  {execution.approval_policy === "DRAFT_ONLY" && (
-                    <span className="execution-note">Draft-only policy: Jiraya will not send this message.</span>
-                  )}
-                  {execution.status === "BLOCKED_BY_POLICY" && (
-                    <span className="execution-note warning">
-                      External actions are disabled. Set ENABLE_EXTERNAL_ACTIONS=true before approving a real send.
-                    </span>
-                  )}
-                  {execution.status === "VERIFIED_SUCCESS" && (
-                    <span className="execution-note success">Sent and verified by Gmail.</span>
-                  )}
-                  {approvable && (
-                    <button className="primary-button" onClick={approveExecution}>Approve &amp; Send</button>
-                  )}
-                  {runResult.decision === "EXISTING_EXECUTION" && (
-                    <button className="secondary-button" onClick={() => runLatestEmail(true)}>Regenerate draft</button>
-                  )}
+            {runResult && (
+              <div className="execution-panel">
+                <div className="execution-header">
+                  <div><span className="small-label">Automation execution</span><strong>{nice(runResult.decision)}</strong></div>
+                  {runResult.match && <span className="execution-confidence">{Math.round(runResult.match.confidence * 100)}% match</span>}
                 </div>
+                {runResult.action_route && <div className="route-note"><strong>{nice(runResult.action_route.decision)}</strong><span>{runResult.action_route.reason}</span></div>}
+                {execution?.action_type === "DRAFT_REPLY" && executionDraft && (
+                  <div className="draft-workspace">
+                    <label>Generated reply<textarea rows={8} value={executionDraft} onChange={(event) => setExecutionDraft(event.target.value)} readOnly={execution.status === "VERIFIED_SUCCESS"} /></label>
+                    <div className="execution-actions">
+                      {execution.approval_policy === "DRAFT_ONLY" && <span className="execution-note">Draft-only policy: Jiraya will not send this message.</span>}
+                      {execution.status === "BLOCKED_BY_POLICY" && <span className="execution-note warning">External actions are disabled.</span>}
+                      {execution.status === "VERIFIED_SUCCESS" && <span className="execution-note success">Sent and verified by Gmail.</span>}
+                      {approvable && <button className="primary-button" onClick={approveExecution}>Approve &amp; Send</button>}
+                      {runResult.decision === "EXISTING_EXECUTION" && <button className="secondary-button" onClick={() => runLatestEmail(true)}>Regenerate draft</button>}
+                    </div>
+                  </div>
+                )}
+                {execution?.action_type === "NOTIFY" && <div className="notification-result"><strong>{str(execution.output.title) || "Jiraya notification"}</strong><p>{str(execution.output.message)}</p></div>}
               </div>
             )}
+          </section>
 
-            {execution?.action_type === "NOTIFY" && (
-              <div className="notification-result">
-                <strong>{str(execution.output.title) || "Jiraya notification"}</strong>
-                <p>{str(execution.output.message)}</p>
+          <aside className="inspector">
+            <div className="inspector-heading"><span className="eyebrow">Configuration</span><h2>Automation logic</h2><p>Define what Jiraya should notice, what context it may use, and what action it may take.</p></div>
+            <label>Name<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
+            <label>Description<textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></label>
+            <div className="section-divider" /><span className="section-title">Match incoming Gmail</span>
+            <label>Semantic condition<textarea rows={5} placeholder="Example: A professor tells me an assignment/submission deadline." value={str(draft.match_config.semantic_condition)} onChange={(e) => updateMatch("semantic_condition", e.target.value)} /></label>
+            <div className="two-column">
+              <label>Sender contains<input value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>
+              <label>Subject contains<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
+            </div>
+            <label>Body contains<input value={str(draft.match_config.body_contains)} onChange={(e) => updateMatch("body_contains", e.target.value)} /></label>
+            <label>Personal context / operating instructions<textarea rows={4} value={str(draft.context_config.instructions)} onChange={(e) => updateContext("instructions", e.target.value)} /></label>
+            <div className="section-divider" /><span className="section-title">Action &amp; policy</span>
+            <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}><option value="DRAFT_REPLY">Draft reply</option><option value="NOTIFY">Notify me</option></select></label>
+            <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>
+            <label>Approval policy<select value={draft.approval_policy} onChange={(e) => setDraft({ ...draft, approval_policy: e.target.value as AutomationInput["approval_policy"] })}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>
+            {draft.approval_policy === "AUTO" && <div className="policy-explainer">Automatic is context-aware: Jiraya can downgrade an unsafe or changed situation to approval or notification instead of blindly replying.</div>}
+            <label className="toggle-row"><span><strong>Automation enabled</strong><small>Enabled automations are watched automatically by the Gmail runtime.</small></span><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} /></label>
+            {selected && <button className="danger-link" onClick={removeSelected}>Delete automation</button>}
+          </aside>
+        </>
+      ) : (
+        <section className="operations-page">
+          {activeView === "NOTIFICATIONS" ? (
+            <>
+              <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>Automatic actions, items that need you, informational alerts, and obligation state changes.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
+              <div className="filter-tabs">
+                {["ALL", "ACTION_REQUIRED", "AUTOMATION_EXECUTED", "INFORMATION", "STATE_CHANGED"].map((filter) => <button key={filter} className={notificationFilter === filter ? "active" : ""} onClick={() => setNotificationFilter(filter)}>{filter === "ALL" ? "All" : nice(filter)}</button>)}
               </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      <aside className="inspector">
-        <div className="inspector-heading">
-          <span className="eyebrow">Configuration</span>
-          <h2>Automation logic</h2>
-          <p>Define what Jiraya should notice, what context it should use, and what action it may take.</p>
-        </div>
-
-        <label>
-          Name
-          <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-        </label>
-
-        <label>
-          Description
-          <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-        </label>
-
-        <div className="section-divider" />
-        <span className="section-title">Match incoming Gmail</span>
-
-        <label>
-          Semantic condition
-          <textarea
-            rows={5}
-            placeholder="Example: An employer is asking to schedule or continue an internship interview process."
-            value={str(draft.match_config.semantic_condition)}
-            onChange={(e) => updateMatch("semantic_condition", e.target.value)}
-          />
-        </label>
-
-        <div className="two-column">
-          <label>
-            Sender contains
-            <input value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} />
-          </label>
-          <label>
-            Subject contains
-            <input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} />
-          </label>
-        </div>
-
-        <label>
-          Body contains
-          <input value={str(draft.match_config.body_contains)} onChange={(e) => updateMatch("body_contains", e.target.value)} />
-        </label>
-
-        <label>
-          Personal context / operating instructions
-          <textarea
-            rows={4}
-            placeholder="Example: I cannot interview Wednesday. Prefer Friday after 1 PM."
-            value={str(draft.context_config.instructions)}
-            onChange={(e) => updateContext("instructions", e.target.value)}
-          />
-        </label>
-
-        <div className="section-divider" />
-        <span className="section-title">Action & policy</span>
-
-        <label>
-          Action
-          <select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>
-            <option value="DRAFT_REPLY">Draft reply</option>
-            <option value="NOTIFY">Notify me</option>
-          </select>
-        </label>
-
-        <label>
-          Action instructions
-          <textarea
-            rows={4}
-            value={str(draft.action_config.instructions)}
-            onChange={(e) => updateAction("instructions", e.target.value)}
-          />
-        </label>
-
-        <label>
-          Approval policy
-          <select
-            value={draft.approval_policy}
-            onChange={(e) => setDraft({ ...draft, approval_policy: e.target.value as AutomationInput["approval_policy"] })}
-          >
-            <option value="DRAFT_ONLY">Draft only</option>
-            <option value="REQUIRED">Ask before action</option>
-            <option value="AUTO">Automatic</option>
-          </select>
-        </label>
-
-        <label className="toggle-row">
-          <span>
-            <strong>Automation enabled</strong>
-            <small>Paused automations remain saved but do not match events.</small>
-          </span>
-          <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
-        </label>
-
-        {selected && <button className="danger-link" onClick={removeSelected}>Delete automation</button>}
-      </aside>
+              <div className="operations-list">
+                {filteredNotifications.map((item) => (
+                  <button className={`notification-card ${item.read_at ? "read" : "unread"} severity-${item.severity.toLowerCase()}`} key={item.id} onClick={() => markRead(item)}>
+                    <div className="notification-card-top"><span className="notification-category">{nice(item.category)}</span><span>{when(item.created_at)}</span></div>
+                    <strong>{item.title}</strong><p>{item.message}</p>
+                    <div className="notification-meta"><span>{item.source}</span>{item.obligation_id && <span>Obligation linked</span>}{!item.read_at && <span>Unread</span>}</div>
+                  </button>
+                ))}
+                {!filteredNotifications.length && <div className="empty-state"><strong>No notifications here.</strong><span>Background automation events will appear automatically.</span></div>}
+              </div>
+            </>
+          ) : (
+            <>
+              <header className="operations-header"><div><span className="eyebrow">Obligations</span><h1>Work that remains true over time</h1><p>Jiraya keeps these open until later evidence proves they are resolved, superseded, or cancelled.</p></div></header>
+              <div className="filter-tabs"><button className={obligationFilter === "OPEN" ? "active" : ""} onClick={() => setObligationFilter("OPEN")}>Open</button><button className={obligationFilter === "RESOLVED" ? "active" : ""} onClick={() => setObligationFilter("RESOLVED")}>Resolved / closed</button></div>
+              <div className="operations-list obligation-grid">
+                {filteredObligations.map((item) => (
+                  <article className={`obligation-card ${item.status === "OPEN" ? "open" : "closed"}`} key={item.id}>
+                    <div className="obligation-card-top"><span>{nice(item.status)}</span><span>{when(item.updated_at)}</span></div>
+                    <strong>{item.title}</strong><p>{item.description}</p>
+                    <div className="notification-meta"><span>{item.source}</span><span>{nice(item.obligation_type)}</span>{item.external_thread_id && <span>Gmail thread</span>}</div>
+                    {item.resolution && Object.keys(item.resolution).length > 0 && <div className="resolution-box"><span className="small-label">Resolution</span><p>{str(item.resolution.reason) || nice(item.status)}</p></div>}
+                  </article>
+                ))}
+                {!filteredObligations.length && <div className="empty-state"><strong>No {obligationFilter.toLowerCase()} obligations.</strong><span>Requests, deadlines and later changes will appear here as Jiraya observes them.</span></div>}
+              </div>
+            </>
+          )}
+        </section>
+      )}
     </main>
   );
 }

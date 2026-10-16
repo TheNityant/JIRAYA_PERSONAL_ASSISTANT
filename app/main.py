@@ -26,10 +26,10 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
-    version="0.6.0",
+    version="0.5.0",
     description=(
-        "Phase-2E Jiraya API: user-configurable automations with persisted execution, "
-        "draft/approval policy, verified Gmail actions, connections, reconciliation, and obligations."
+        "Jiraya API: user-configurable automations with persisted execution, draft/approval "
+        "policy, verified Gmail actions, connections, reconciliation, and obligations."
     ),
     lifespan=lifespan,
 )
@@ -54,7 +54,7 @@ app.include_router(connections.router)
 def root() -> dict:
     return {
         "name": settings.app_name,
-        "version": "0.6.0",
-        "phase": "phase-2e",
+        "version": "0.5.0",
+        "phase": "phase-2d",
         "docs": "/docs",
     }

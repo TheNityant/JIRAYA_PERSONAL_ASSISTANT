@@ -27,26 +27,28 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://jiraya:jiraya_dev_password@localhost:5432/jiraya"
     enable_external_actions: bool = False
 
-    # Phase 2D still runs as a single-user development app. The user/connection
-    # tables are production-shaped, while real sign-in is added in a later phase.
     dev_user_id: str = "local-dev-user"
     dev_user_email: str = "local@jiraya.dev"
 
-    # Database-backed connection secrets are encrypted before persistence.
-    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     token_encryption_key: str = ""
 
-    # Web OAuth client owned by Jiraya (not by each end user).
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "http://127.0.0.1:8000/connections/google/callback"
 
-    # Legacy local Gmail flow remains as a development fallback during migration.
     gmail_credentials_path: str = "credentials.json"
     gmail_token_path: str = "token.json"
     gmail_classification_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     gmail_reply_template_path: str = "app/templates/internship_reply.txt"
     gmail_reply_signature: str = "Nityant"
+
+    # Automatic Gmail runtime. Local development can poll Gmail history; production
+    # can additionally use users.watch + Pub/Sub to wake this same event processor.
+    gmail_background_monitor_enabled: bool = True
+    gmail_background_poll_seconds: int = Field(default=15, ge=5, le=3600)
+    gmail_pubsub_topic_name: str = ""
+    gmail_pubsub_webhook_token: str = ""
+    gmail_watch_auto_register: bool = True
 
 
 @lru_cache

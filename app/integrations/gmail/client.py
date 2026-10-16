@@ -85,12 +85,24 @@ class GmailClient:
         )
         return [item["id"] for item in response.get("messages", [])]
 
-    def get_latest_unread_inbox(self) -> GmailMessage | None:
-        ids = self.list_message_ids(query="is:unread in:inbox", max_results=10)
+    def _latest_for_query(self, query: str) -> GmailMessage | None:
+        ids = self.list_message_ids(query=query, max_results=10)
         if not ids:
             return None
         messages = [self.get_message(message_id) for message_id in ids]
         return max(messages, key=lambda item: item.internal_date_ms)
+
+    def get_latest_inbox(self) -> GmailMessage | None:
+        """Newest incoming inbox message regardless of read state.
+
+        Manual debug/test controls should be stable even when the user has already opened
+        the message in Gmail. The automatic runtime does not use this helper; it consumes
+        exact Gmail history message IDs instead.
+        """
+        return self._latest_for_query("in:inbox")
+
+    def get_latest_unread_inbox(self) -> GmailMessage | None:
+        return self._latest_for_query("is:unread in:inbox")
 
     def get_thread_messages(self, thread_id: str) -> list[GmailMessage]:
         raw_thread = (

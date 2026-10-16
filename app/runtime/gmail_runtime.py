@@ -14,11 +14,13 @@ from app.services.action_store import ActionStore
 from app.services.automation_store import AutomationStore
 from app.services.connection_store import ConnectionStore
 from app.services.notification_store import NotificationStore
+from app.services.obligation_store import ObligationStore
 from app.services.runtime_state_store import RuntimeStateStore
 from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
 
 
 BOOTSTRAP_LOOKBACK_MS = 2 * 60 * 1000
+OPEN_OBLIGATION_SWEEP_LIMIT = 20
 
 
 class GmailRuntimeService:
@@ -33,6 +35,7 @@ class GmailRuntimeService:
         self.notifications = NotificationStore(db)
         self.actions = ActionStore(db)
         self.automations = AutomationStore(db)
+        self.obligations = ObligationStore(db)
         self.executor = ReliableAutomationExecutor(
             settings=settings,
             db=db,
@@ -74,19 +77,26 @@ class GmailRuntimeService:
                 },
             )
             bootstrap_result = self._bootstrap_recent_inbox()
+            sweep = self.reconcile_open_obligations()
             return {
                 "decision": "CURSOR_INITIALIZED",
                 "processed": 1 if bootstrap_result else 0,
                 "history_id": current_history_id,
                 "bootstrap_result": bootstrap_result,
+                "reconciliation_sweep": sweep,
                 "watch_error": watch_error,
             }
 
         if str(state["history_id"]) == current_history_id:
+            # Gmail history can be quiet even though an existing OPEN obligation deserves
+            # re-evaluation under newer reconciliation semantics. Sweeping open obligations
+            # makes persisted work self-healing instead of requiring another email event.
+            sweep = self.reconcile_open_obligations()
             return {
                 "decision": "NO_CHANGE",
                 "processed": 0,
                 "history_id": current_history_id,
+                "reconciliation_sweep": sweep,
                 "watch_error": watch_error,
             }
 
@@ -106,6 +116,37 @@ class GmailRuntimeService:
         if message.internal_date_ms <= 0 or now_ms - message.internal_date_ms > BOOTSTRAP_LOOKBACK_MS:
             return None
         return self.process_message(message)
+
+    def reconcile_open_obligations(self, *, limit: int = OPEN_OBLIGATION_SWEEP_LIMIT) -> list[dict]:
+        """Reconcile persisted OPEN obligations even when Gmail history is otherwise quiet.
+
+        This is intentionally bounded. The workflow itself checkpoints sent candidates, so
+        a candidate evaluated with the current resolver version is not repeatedly sent to
+        the model on every poll. Older resolver decisions may be reconsidered once.
+        """
+        results: list[dict] = []
+        seen_actions: set[str] = set()
+        for obligation in self.obligations.list_recent(status="OPEN", limit=limit):
+            action_id = obligation.related_action_id
+            if not action_id or action_id in seen_actions:
+                continue
+            seen_actions.add(action_id)
+            result = GmailReconciliationWorkflow(
+                db=self.db,
+                provider=self.provider,
+                gmail=self.gmail,
+            ).run(action_id=action_id)
+            self._notify_reconciliation(action_id=action_id, result=result)
+            results.append(
+                {
+                    "action_id": action_id,
+                    "obligation_id": obligation.id,
+                    "decision": result.get("decision"),
+                    "classification": result.get("classification"),
+                    "resolution_status": result.get("resolution_status"),
+                }
+            )
+        return results
 
     def ensure_watch(self) -> dict | None:
         """Renew the Gmail watch when it is absent or within 24 hours of expiry."""
@@ -162,11 +203,13 @@ class GmailRuntimeService:
                 },
             )
             bootstrap_result = self._bootstrap_recent_inbox()
+            sweep = self.reconcile_open_obligations()
             return {
                 "decision": "CURSOR_INITIALIZED",
                 "processed": 1 if bootstrap_result else 0,
                 "history_id": history_id,
                 "bootstrap_result": bootstrap_result,
+                "reconciliation_sweep": sweep,
             }
 
         start_history_id = str(state["history_id"])
@@ -231,17 +274,29 @@ class GmailRuntimeService:
     def process_message(self, message: GmailMessage) -> dict:
         action = self.actions.latest_verified_for_thread(message.thread_id)
         if action is not None and message.id != (action.context or {}).get("source_message_id"):
-            reconciliation = GmailReconciliationWorkflow(
+            workflow = GmailReconciliationWorkflow(
                 db=self.db,
                 provider=self.provider,
                 gmail=self.gmail,
-            ).run(action_id=action.id)
+            )
+            reconciliation = workflow.run(action_id=action.id)
             self._notify_reconciliation(action_id=action.id, result=reconciliation)
+
+            # If this incoming history event arrived after a user/agent SENT message that
+            # resolves an obligation, the first workflow pass may intentionally resolve the
+            # sent candidate first. Run once more so the current incoming acknowledgement
+            # or new request is not lost merely because resolution had priority.
+            follow_up_reconciliation = None
+            if "SENT" not in message.labels and reconciliation.get("decision") == "OBLIGATION_RESOLVED":
+                follow_up_reconciliation = workflow.run(action_id=action.id)
+                self._notify_reconciliation(action_id=action.id, result=follow_up_reconciliation)
+
             return {
                 "message_id": message.id,
                 "thread_id": message.thread_id,
                 "path": "RECONCILIATION",
                 "result": reconciliation,
+                "follow_up_result": follow_up_reconciliation,
             }
 
         if "SENT" in message.labels:

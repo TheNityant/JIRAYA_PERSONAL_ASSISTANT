@@ -72,21 +72,23 @@ function toInput(item: Automation): AutomationInput {
 }
 
 function notificationLabel(category: string): string {
-  return {
-    ACTION_REQUIRED: "Needs you",
-    AUTOMATION_EXECUTED: "Done by Jiraya",
-    INFORMATION: "FYI",
-    STATE_CHANGED: "State changed",
-  }[category] ?? nice(category);
+  switch (category) {
+    case "ACTION_REQUIRED": return "Needs you";
+    case "AUTOMATION_EXECUTED": return "Done by Jiraya";
+    case "INFORMATION": return "FYI";
+    case "STATE_CHANGED": return "State changed";
+    default: return nice(category);
+  }
 }
 
 function notificationIcon(category: string): string {
-  return {
-    ACTION_REQUIRED: "!",
-    AUTOMATION_EXECUTED: "✓",
-    INFORMATION: "i",
-    STATE_CHANGED: "↻",
-  }[category] ?? "•";
+  switch (category) {
+    case "ACTION_REQUIRED": return "!";
+    case "AUTOMATION_EXECUTED": return "✓";
+    case "INFORMATION": return "i";
+    case "STATE_CHANGED": return "↻";
+    default: return "•";
+  }
 }
 
 function buildNodes(draft: AutomationInput): Node[] {
@@ -190,9 +192,6 @@ export default function AutomationBuilder() {
   }, []);
 
   useEffect(() => {
-    // Do not hammer all operations endpoints while the user is typing in the automation
-    // editor. The old five-second full refresh rerendered the entire React Flow canvas and
-    // made the configuration panel feel frozen. Operations views still refresh quickly.
     const delay = activeView === "AUTOMATIONS" ? 15000 : 5000;
     const timer = window.setInterval(() => {
       if (activeView === "AUTOMATIONS") {
@@ -213,8 +212,6 @@ export default function AutomationBuilder() {
   ].join("\u0000");
 
   useEffect(() => {
-    // Updating React Flow on every unrelated keystroke was expensive. Only fields shown
-    // on nodes participate, with a tiny debounce for long semantic/context textareas.
     const timer = window.setTimeout(() => {
       const fresh = buildNodes(draft);
       setNodes((current) =>
@@ -295,9 +292,6 @@ export default function AutomationBuilder() {
       const saved = selected
         ? await api.updateAutomation(selected.id, draft)
         : await api.createAutomation(draft);
-
-      // Use the server response as the source of truth immediately. Do not perform a
-      // second list/refetch round-trip that can race the controlled form and snap it back.
       setAutomations((current) => {
         const exists = current.some((item) => item.id === saved.id);
         const next = exists

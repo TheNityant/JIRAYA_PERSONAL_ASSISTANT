@@ -28,6 +28,54 @@ class GmailClient:
     def get_profile(self) -> dict[str, Any]:
         return self.service.users().getProfile(userId="me").execute()
 
+    def register_watch(self, *, topic_name: str) -> dict[str, Any]:
+        if not topic_name:
+            raise ValueError("A Pub/Sub topic name is required to register a Gmail watch.")
+        # Deliberately watch the whole mailbox rather than only INBOX so Jiraya also
+        # observes the user's own SENT replies and can resolve obligations automatically.
+        return (
+            self.service.users()
+            .watch(userId="me", body={"topicName": topic_name})
+            .execute()
+        )
+
+    def stop_watch(self) -> None:
+        self.service.users().stop(userId="me").execute()
+
+    def list_history_message_ids(self, *, start_history_id: str) -> tuple[list[str], str]:
+        """Return message IDs added since a Gmail history cursor and the newest cursor."""
+        page_token: str | None = None
+        message_ids: list[str] = []
+        seen: set[str] = set()
+        newest_history_id = str(start_history_id)
+
+        while True:
+            response = (
+                self.service.users()
+                .history()
+                .list(
+                    userId="me",
+                    startHistoryId=str(start_history_id),
+                    historyTypes=["messageAdded"],
+                    pageToken=page_token,
+                    maxResults=500,
+                )
+                .execute()
+            )
+            newest_history_id = str(response.get("historyId") or newest_history_id)
+            for history in response.get("history", []) or []:
+                newest_history_id = str(history.get("id") or newest_history_id)
+                for added in history.get("messagesAdded", []) or []:
+                    message_id = str((added.get("message") or {}).get("id") or "")
+                    if message_id and message_id not in seen:
+                        seen.add(message_id)
+                        message_ids.append(message_id)
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+        return message_ids, newest_history_id
+
     def list_message_ids(self, *, query: str, max_results: int = 10) -> list[str]:
         response = (
             self.service.users()

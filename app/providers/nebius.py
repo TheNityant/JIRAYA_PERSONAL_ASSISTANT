@@ -7,7 +7,10 @@ from app.providers.base import ModelProvider
 class NebiusProvider(ModelProvider):
     def __init__(self, settings: Settings):
         if not settings.nebius_api_key:
-            raise ValueError("NEBIUS_API_KEY is missing. Copy .env.example to .env and add your key.")
+            raise ValueError(
+                "NEBIUS_API_KEY is missing. Set the real key in your local .env file; "
+                "never place credentials in .env.example."
+            )
 
         self._model = settings.nebius_model
         self._client = OpenAI(

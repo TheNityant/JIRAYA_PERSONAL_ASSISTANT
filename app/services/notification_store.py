@@ -86,17 +86,35 @@ class NotificationStore:
         obligation_id: str,
         categories: tuple[str, ...] = ("ACTION_REQUIRED",),
     ) -> int:
-        """Close stale unread alerts when their linked obligation is resolved.
-
-        Notification history is preserved; this only marks the old attention item read so
-        the Notification Center no longer tells the user action is required after reality
-        has already proven the work complete.
-        """
+        """Close stale unread alerts when their linked obligation is resolved."""
         statement = (
             select(Notification)
             .where(Notification.user_id == user_id)
             .where(Notification.obligation_id == obligation_id)
             .where(Notification.category.in_(categories))
+            .where(Notification.read_at.is_(None))
+        )
+        items = list(self.db.scalars(statement).all())
+        if not items:
+            return 0
+        now = datetime.now(timezone.utc)
+        for item in items:
+            item.read_at = now
+            self.db.add(item)
+        self.db.commit()
+        return len(items)
+
+    def mark_automation_attention_read(self, *, automation_id: str) -> int:
+        """Retire old approval/attention cards when the automation configuration changes.
+
+        The current prototype is single-user. Keeping the historical notification but
+        marking it read prevents an old "waiting for approval" card from looking like the
+        current AUTO policy still requires approval.
+        """
+        statement = (
+            select(Notification)
+            .where(Notification.automation_id == automation_id)
+            .where(Notification.category == "ACTION_REQUIRED")
             .where(Notification.read_at.is_(None))
         )
         items = list(self.db.scalars(statement).all())

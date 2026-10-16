@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.integrations.gmail.client import GmailClient
+from app.integrations.gmail.connection import get_gmail_client
 from app.integrations.google.oauth import GOOGLE_GMAIL_SCOPES, build_google_oauth_flow
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
+from app.services.runtime_state_store import RuntimeStateStore
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 
@@ -93,7 +95,7 @@ def start_google_connection(
     return_to: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    del return_to  # Reserved for a future per-screen redirect allowlist.
+    del return_to
     settings = get_settings()
     store = ConnectionStore(db)
     store.ensure_user(user_id=settings.dev_user_id, email=settings.dev_user_email)
@@ -135,20 +137,38 @@ def google_connection_callback(
 
     try:
         if settings.app_env.lower() == "development":
-            # OAuthlib otherwise rejects an http localhost redirect in some environments.
             os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
         flow = build_google_oauth_flow(settings, state=state)
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
-        profile = GmailClient(settings, credentials=credentials).get_profile()
+        gmail = GmailClient(settings, credentials=credentials)
+        profile = gmail.get_profile()
         email_address = profile.get("emailAddress")
         if not email_address:
             raise RuntimeError("Google authorized Gmail, but no mailbox identity was returned.")
 
+        history_id = str(profile.get("historyId") or "")
+        metadata = {"gmail_history_id": history_id}
+        if settings.gmail_watch_auto_register and settings.gmail_pubsub_topic_name:
+            try:
+                watch = gmail.register_watch(topic_name=settings.gmail_pubsub_topic_name)
+                history_id = str(watch.get("historyId") or history_id)
+                metadata.update(
+                    {
+                        "gmail_history_id": history_id,
+                        "gmail_watch_expiration": watch.get("expiration"),
+                        "gmail_pubsub_topic": settings.gmail_pubsub_topic_name,
+                    }
+                )
+            except Exception as watch_exc:
+                # OAuth connection remains useful because the local history monitor can
+                # still run even if Pub/Sub has not been configured correctly yet.
+                metadata["gmail_watch_error"] = type(watch_exc).__name__
+
         cipher = TokenCipher(settings.token_encryption_key)
-        store.upsert(
+        connection = store.upsert(
             user_id=state_record.user_id,
             provider="google",
             provider_account_id=email_address,
@@ -156,7 +176,16 @@ def google_connection_callback(
             scopes=list(credentials.scopes or GOOGLE_GMAIL_SCOPES),
             credential_ciphertext=cipher.encrypt(credentials.to_json()),
             token_expires_at=credentials.expiry,
-            metadata={"gmail_history_id": profile.get("historyId")},
+            metadata=metadata,
+        )
+        RuntimeStateStore(db).set(
+            f"gmail-history:{state_record.user_id}",
+            {
+                "history_id": history_id,
+                "email_address": email_address,
+                "watch_expiration": metadata.get("gmail_watch_expiration"),
+                "connection_id": connection.id,
+            },
         )
     except Exception as exc:
         return _frontend_redirect(
@@ -171,6 +200,11 @@ def google_connection_callback(
 @router.post("/google/disconnect")
 def disconnect_google(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
+    if settings.gmail_pubsub_topic_name:
+        try:
+            get_gmail_client(db, settings).stop_watch()
+        except Exception:
+            pass
     connection = ConnectionStore(db).disconnect(
         user_id=settings.dev_user_id,
         provider="google",

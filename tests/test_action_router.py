@@ -64,7 +64,7 @@ def test_router_can_downgrade_broad_match_to_notification():
     assert result.confidence == 0.96
 
 
-def test_low_confidence_auto_action_is_downgraded_to_approval():
+def test_low_confidence_auto_action_falls_back_to_notification_not_approval():
     provider = JsonProvider(
         '{"decision":"AUTO_ACT","confidence":0.50,"reason":"Possibly a routine reminder."}'
     )
@@ -72,4 +72,16 @@ def test_low_confidence_auto_action_is_downgraded_to_approval():
         automation=automation(),
         message=message("Please see the updated submission information."),
     )
-    assert result.decision == "REQUIRE_APPROVAL"
+    assert result.decision == "NOTIFY_ONLY"
+
+
+def test_legacy_require_approval_output_is_normalized_to_notification_for_auto():
+    provider = JsonProvider(
+        '{"decision":"REQUIRE_APPROVAL","confidence":0.91,"reason":"The model is uncertain about a changed detail."}'
+    )
+    result = AutomationActionRouter(provider).route(
+        automation=automation(),
+        message=message("There is a changed requirement in the submission."),
+    )
+    assert result.decision == "NOTIFY_ONLY"
+    assert "Automatic" in result.reason

@@ -65,6 +65,8 @@ class GmailReconciliationWorkflow:
                 reason=f"Gmail thread could not be observed: {type(exc).__name__}",
             )
 
+        user_email = self._infer_user_email(action, thread_messages)
+
         # A Phase-2A reconciliation may already have returned requires_follow_up=True
         # before the obligations table existed. Materialize that state once so an
         # existing live demo can continue into Phase 2B without repeating the email.
@@ -75,11 +77,16 @@ class GmailReconciliationWorkflow:
                 action=action,
             )
 
-        # A later SENT message is only a resolution candidate. A replay may recover a
-        # terminal obligation for the same trigger; terminal obligations are historical
-        # evidence and must never be evaluated or resolved a second time.
+        # A later user-authored SENT message is only a resolution candidate. Direction is
+        # determined from both Gmail's SENT label and the mailbox address inferred from the
+        # verified action. This prevents a manually-authored reply from ever being treated
+        # as a new incoming request merely because a provider omitted/mangled labels.
         if open_obligation and open_obligation.status == "OPEN":
-            resolution_message = self._latest_sent_after_obligation(open_obligation, thread_messages)
+            resolution_message = self._latest_sent_after_obligation(
+                open_obligation,
+                thread_messages,
+                user_email=user_email,
+            )
             if resolution_message:
                 return self._evaluate_sent_resolution_candidate(
                     reconciliation_id=reconciliation_id,
@@ -88,7 +95,11 @@ class GmailReconciliationWorkflow:
                     message=resolution_message,
                 )
 
-        later_messages = self._later_incoming_messages(action, thread_messages)
+        later_messages = self._later_incoming_messages(
+            action,
+            thread_messages,
+            user_email=user_email,
+        )
         if not later_messages:
             return {
                 "correlation_id": reconciliation_id,
@@ -231,9 +242,6 @@ class GmailReconciliationWorkflow:
             message_internal_date_ms=internal_date_ms,
             evidence=evidence,
         )
-        # Only record a backfill event for a genuinely open reconstructed obligation.
-        # If the same trigger already has a terminal obligation, returning it lets the
-        # caller expose the historical resolution without reopening or re-resolving it.
         if obligation.status == "OPEN":
             self.ledger.append(
                 source="reconciliator",
@@ -373,8 +381,14 @@ class GmailReconciliationWorkflow:
             "reason": reason,
         }
 
-    @staticmethod
-    def _later_incoming_messages(action: Action, messages: list) -> list:
+    @classmethod
+    def _later_incoming_messages(
+        cls,
+        action: Action,
+        messages: list,
+        *,
+        user_email: str | None = None,
+    ) -> list:
         reference_time = action.verified_at or action.executed_at
         if reference_time.tzinfo is None:
             reference_time = reference_time.replace(tzinfo=timezone.utc)
@@ -387,12 +401,18 @@ class GmailReconciliationWorkflow:
             for message in messages
             if message.internal_date_ms > threshold_ms
             and message.id not in {source_id, sent_id}
-            and "SENT" not in message.labels
+            and not cls._is_user_sent(message, user_email=user_email)
         ]
         return sorted(later, key=lambda item: item.internal_date_ms)
 
-    @staticmethod
-    def _latest_sent_after_obligation(obligation: Obligation, messages: list):
+    @classmethod
+    def _latest_sent_after_obligation(
+        cls,
+        obligation: Obligation,
+        messages: list,
+        *,
+        user_email: str | None = None,
+    ):
         context = obligation.context or {}
         trigger_ms = int(context.get("trigger_internal_date_ms") or 0)
         candidate = context.get("last_resolution_candidate") or {}
@@ -401,9 +421,6 @@ class GmailReconciliationWorkflow:
         except (TypeError, ValueError):
             candidate_version = 0
 
-        # Resolver semantics can improve over time. A candidate rejected by an older
-        # resolver may be reconsidered once under the current version; once evaluated by
-        # the current version, the normal checkpoint prevents repeated model calls.
         if candidate and candidate_version < OBLIGATION_RESOLVER_VERSION:
             checkpoint_ms = trigger_ms
         else:
@@ -414,11 +431,36 @@ class GmailReconciliationWorkflow:
         later_sent = [
             message
             for message in messages
-            if message.internal_date_ms > checkpoint_ms and "SENT" in message.labels
+            if message.internal_date_ms > checkpoint_ms
+            and cls._is_user_sent(message, user_email=user_email)
         ]
         if not later_sent:
             return None
         return max(later_sent, key=lambda item: item.internal_date_ms)
+
+    @staticmethod
+    def _infer_user_email(action: Action, messages: list) -> str | None:
+        sent_id = str((action.context or {}).get("sent_message_id") or "")
+        if sent_id:
+            for message in messages:
+                if message.id == sent_id and message.sender:
+                    return message.sender.casefold()
+
+        # Fall back to any Gmail message explicitly labelled SENT. This keeps the
+        # reconciliator provider-agnostic while still learning the connected mailbox
+        # identity from evidence already present in the thread.
+        for message in messages:
+            if "SENT" in message.labels and message.sender:
+                return message.sender.casefold()
+        return None
+
+    @staticmethod
+    def _is_user_sent(message, *, user_email: str | None = None) -> bool:
+        if "SENT" in message.labels:
+            return True
+        if user_email and message.sender:
+            return message.sender.casefold() == user_email.casefold()
+        return False
 
     @staticmethod
     def _obligation_payload(obligation: Obligation | None) -> dict | None:

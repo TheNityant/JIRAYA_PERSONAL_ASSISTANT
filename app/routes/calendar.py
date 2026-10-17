@@ -202,12 +202,16 @@ def calendar_status(db: Session = Depends(get_db)) -> dict:
         provider="google_calendar",
     )
     health = RuntimeStateStore(db).get(_health_key(settings.dev_user_id)) or {}
+    connected = bool(connection and all(scope in (connection.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES))
     return {
-        "connected": connection is not None,
-        "account": connection.provider_account_id if connection else None,
+        "connected": connected,
+        "account": connection.provider_account_id if connected else None,
         "scopes": list(connection.scopes or []) if connection else [],
         "oauth_configured": bool(settings.google_oauth_client_id and settings.google_oauth_client_secret),
         "health": health,
+        "monitor": RuntimeStateStore(db).get(f"calendar-monitor-health:{settings.dev_user_id}") or {},
+        "background_monitor_configured": settings.calendar_background_monitor_enabled,
+        "poll_seconds": settings.calendar_background_poll_seconds,
     }
 
 
@@ -300,3 +304,12 @@ def delete_calendar_event(
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Calendar action failed: {type(exc).__name__}: {exc}") from exc
+
+
+@router.post("/runtime/calendar/poll")
+def poll_calendar(db: Session = Depends(get_db)) -> dict:
+    from app.runtime.calendar_runtime import CalendarRuntimeService
+    try:
+        return CalendarRuntimeService(db=db, settings=get_settings()).poll()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Calendar sync failed. Check Calendar connection and runtime status.") from exc

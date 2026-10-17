@@ -20,7 +20,7 @@ from app.routes import (
     notifications,
     reconciliation,
 )
-from app.runtime.background import gmail_monitor_loop
+from app.runtime.background import calendar_monitor_loop, gmail_monitor_loop
 
 settings = get_settings()
 
@@ -31,13 +31,18 @@ async def lifespan(_: FastAPI):
     monitor_task: asyncio.Task | None = None
     if settings.gmail_background_monitor_enabled:
         monitor_task = asyncio.create_task(gmail_monitor_loop(settings))
+    calendar_task = (asyncio.create_task(calendar_monitor_loop(settings))
+                     if settings.calendar_background_monitor_enabled else None)
     try:
         yield
     finally:
-        if monitor_task:
-            monitor_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await monitor_task
+        for task in (monitor_task, calendar_task):
+            if task:
+                task.cancel()
+        for task in (monitor_task, calendar_task):
+            if task:
+                with suppress(asyncio.CancelledError):
+                    await task
 
 
 app = FastAPI(

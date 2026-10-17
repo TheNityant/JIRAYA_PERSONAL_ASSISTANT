@@ -3,8 +3,8 @@ export type Automation = {
   name: string;
   description: string;
   enabled: boolean;
-  source: "gmail";
-  trigger_type: "NEW_EMAIL";
+  source: "gmail" | "google_calendar";
+  trigger_type: "NEW_EMAIL" | "CALENDAR_CHANGED";
   match_config: Record<string, unknown>;
   context_config: Record<string, unknown>;
   action_config: Record<string, unknown>;
@@ -94,6 +94,9 @@ export type ServiceStatus = {
   scopes: string[];
   oauth_configured: boolean;
   health: Record<string, unknown>;
+  monitor?: { last_status?: string; last_error?: string; last_poll_at?: string; last_decision?: string };
+  background_monitor_configured?: boolean;
+  poll_seconds?: number;
 };
 
 export type JirayaNotification = {
@@ -207,6 +210,7 @@ export const api = {
   googleConnectUrl: () => `${API_BASE}/connections/google/start`,
   calendarConnectUrl: () => `${API_BASE}/connections/google/calendar/start`,
   githubConnectUrl: () => `${API_BASE}/connections/github/start`,
+  pollCalendar: () => request<{decision: string}>("/runtime/calendar/poll", { method: "POST" }),
   calendarStatus: () => request<ServiceStatus>("/calendar/status"),
   githubStatus: () => request<ServiceStatus>("/github/status"),
   disconnectCalendar: () =>
@@ -217,7 +221,7 @@ export const api = {
     request<{ disconnected: boolean; provider: string }>("/connections/github/disconnect", {
       method: "POST",
     }),
-  listCalendarEvents: (limit = 20) => request<any>(`/calendar/events?limit=${limit}`),
+  listCalendarEvents: (limit = 20) => request<{items: Array<{id: string; summary?: string; htmlLink?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}}> }>(`/calendar/events?limit=${limit}`),
   calendarFreeBusy: (input: Record<string, unknown>) =>
     request<any>("/calendar/freebusy", { method: "POST", body: JSON.stringify(input) }),
   createCalendarEvent: (input: Record<string, unknown>) =>

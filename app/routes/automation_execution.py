@@ -22,13 +22,13 @@ class ApprovalRequest(BaseModel):
     draft_body: str | None = None
 
 
-def _executor(db: Session) -> ReliableAutomationExecutor:
+def _executor(db: Session, *, require_gmail: bool = True) -> ReliableAutomationExecutor:
     settings = get_settings()
     return ReliableAutomationExecutor(
         settings=settings,
         db=db,
         provider=NebiusProvider(settings),
-        gmail=get_gmail_client(db, settings),
+        gmail=get_gmail_client(db, settings) if require_gmail else None,
     )
 
 
@@ -66,7 +66,8 @@ def approve_automation_execution(
     if execution is None:
         raise HTTPException(status_code=404, detail="Automation execution not found")
     try:
-        return _executor(db).approve(execution=execution, edited_draft=request.draft_body)
+        return _executor(db, require_gmail=execution.action_type != "CREATE_CALENDAR_EVENT").approve(
+            execution=execution, edited_draft=request.draft_body)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:

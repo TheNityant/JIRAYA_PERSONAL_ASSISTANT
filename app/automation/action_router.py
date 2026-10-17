@@ -35,13 +35,16 @@ class AutomationActionRouter:
 You are Jiraya's action-safety router.
 
 The email already MATCHED a user-defined automation configured for automatic execution.
-Decide whether Jiraya may perform its configured automatic reply for THIS PARTICULAR message.
+Decide whether Jiraya may perform its configured automatic action for THIS PARTICULAR message.
 
 Return ONLY JSON:
 {{"decision":"AUTO_ACT|NOTIFY_ONLY","confidence":0.0,"reason":"short reason"}}
 
 Automation semantic condition:
 {str((automation.match_config or {}).get('semantic_condition') or '')}
+
+Configured action type:
+{str((automation.action_config or {}).get("type") or "DRAFT_REPLY")}
 
 Configured action instructions:
 {str((automation.action_config or {}).get('instructions') or '')}

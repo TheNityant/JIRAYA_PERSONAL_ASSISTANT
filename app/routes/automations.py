@@ -19,8 +19,8 @@ class AutomationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str = Field(default="", max_length=1000)
     enabled: bool = True
-    source: Literal["gmail"] = "gmail"
-    trigger_type: Literal["NEW_EMAIL"] = "NEW_EMAIL"
+    source: Literal["gmail", "google_calendar"] = "gmail"
+    trigger_type: Literal["NEW_EMAIL", "CALENDAR_CHANGED"] = "NEW_EMAIL"
     match_config: dict[str, Any] = Field(default_factory=dict)
     context_config: dict[str, Any] = Field(default_factory=dict)
     action_config: dict[str, Any] = Field(default_factory=dict)
@@ -31,8 +31,8 @@ class AutomationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=1000)
     enabled: bool | None = None
-    source: Literal["gmail"] | None = None
-    trigger_type: Literal["NEW_EMAIL"] | None = None
+    source: Literal["gmail", "google_calendar"] | None = None
+    trigger_type: Literal["NEW_EMAIL", "CALENDAR_CHANGED"] | None = None
     match_config: dict[str, Any] | None = None
     context_config: dict[str, Any] | None = None
     action_config: dict[str, Any] | None = None
@@ -70,7 +70,9 @@ def automation_capabilities() -> dict:
                 "label": "Gmail",
                 "status": "AVAILABLE",
                 "triggers": [{"id": "NEW_EMAIL", "label": "New incoming email"}],
-            }
+            },
+            {"id": "google_calendar", "label": "Google Calendar", "status": "AVAILABLE",
+             "triggers": [{"id": "CALENDAR_CHANGED", "label": "Calendar event changed"}]},
         ],
         "matchers": [
             {"id": "sender_contains", "label": "Sender contains", "kind": "DETERMINISTIC"},
@@ -81,11 +83,24 @@ def automation_capabilities() -> dict:
         "actions": [
             {"id": "DRAFT_REPLY", "label": "Draft reply", "status": "CONFIGURABLE"},
             {"id": "NOTIFY", "label": "Notify me", "status": "CONFIGURABLE"},
+            {"id": "CREATE_CALENDAR_EVENT", "label": "Create calendar event", "status": "CONFIGURABLE"},
         ],
         "approval_policies": ["DRAFT_ONLY", "REQUIRED", "AUTO"],
         "system_nodes": ["VERIFIER", "RECONCILIATOR", "OBLIGATION"],
-        "coming_next": ["google_calendar", "github"],
+        "coming_next": ["github"],
     }
+
+
+def _validate_logic(values: dict) -> None:
+    source = values["source"]
+    trigger = values["trigger_type"]
+    action = (values.get("action_config") or {}).get("type", "DRAFT_REPLY")
+    if (source, trigger) not in {("gmail", "NEW_EMAIL"), ("google_calendar", "CALENDAR_CHANGED")}:
+        raise HTTPException(status_code=422, detail="Trigger does not belong to the selected source")
+    if action not in {"DRAFT_REPLY", "NOTIFY", "CREATE_CALENDAR_EVENT"}:
+        raise HTTPException(status_code=422, detail="Unsupported action")
+    if source == "google_calendar" and action != "NOTIFY":
+        raise HTTPException(status_code=422, detail="Calendar change triggers support Notify me")
 
 
 @router.get("/automations")
@@ -99,6 +114,7 @@ def list_automations(
 
 @router.post("/automations", status_code=201)
 def create_automation(request: AutomationCreate, db: Session = Depends(get_db)) -> dict:
+    _validate_logic(request.model_dump())
     automation = AutomationStore(db).create(**request.model_dump())
     return _payload(automation)
 
@@ -113,7 +129,9 @@ def update_automation(
     automation = store.get(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
-    return _payload(store.update(automation, request.model_dump(exclude_unset=True)))
+    changes = request.model_dump(exclude_unset=True)
+    _validate_logic({**_payload(automation), **changes})
+    return _payload(store.update(automation, changes))
 
 
 @router.delete("/automations/{automation_id}", status_code=204)

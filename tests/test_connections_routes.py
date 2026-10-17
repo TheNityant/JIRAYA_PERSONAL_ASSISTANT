@@ -14,5 +14,6 @@ def test_connection_catalog_exposes_gmail_and_future_connectors():
     catalog = {item["id"]: item for item in payload["catalog"]}
     assert catalog["gmail"]["status"] in {"AVAILABLE", "CONNECTED"}
     assert catalog["gmail"]["connect_path"] == "/connections/google/start"
-    assert catalog["google_calendar"]["status"] == "COMING_NEXT"
+    assert catalog["google_calendar"]["status"] in {"AVAILABLE", "CONNECTED"}
+    assert catalog["google_calendar"]["connect_path"] == "/connections/google/calendar/start"
     assert catalog["github"]["status"] == "COMING_NEXT"

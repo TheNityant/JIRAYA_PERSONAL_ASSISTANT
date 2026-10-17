@@ -37,12 +37,13 @@ class AutomationExecutionStore:
         match_result: dict,
         draft_body: str = "",
         output: dict | None = None,
+        source: str = "gmail",
     ) -> AutomationExecution:
         now = datetime.now(timezone.utc)
         execution = AutomationExecution(
             automation_id=automation_id,
             correlation_id=correlation_id,
-            source="gmail",
+            source=source,
             source_event_id=source_event_id,
             source_thread_id=source_thread_id,
             action_type=action_type,

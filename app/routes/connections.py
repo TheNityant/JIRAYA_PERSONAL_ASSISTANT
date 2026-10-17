@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.integrations.gmail.client import GmailClient
 from app.integrations.gmail.connection import get_gmail_client
+from app.integrations.calendar.oauth import GOOGLE_CALENDAR_SCOPES
 from app.integrations.google.oauth import GOOGLE_GMAIL_SCOPES, build_google_oauth_flow
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
@@ -103,6 +104,11 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
         active_google
         and all(scope in (active_google.scopes or []) for scope in GOOGLE_GMAIL_SCOPES)
     )
+    active_calendar = store.get_active(user_id=settings.dev_user_id, provider="google_calendar")
+    calendar_connected = bool(active_calendar and all(
+        scope in (active_calendar.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES
+    ))
+    calendar_health = RuntimeStateStore(db).get(f"oauth-calendar-health:{settings.dev_user_id}") or {}
     oauth_health = RuntimeStateStore(db).get(_oauth_state_key(settings.dev_user_id)) or {}
     oauth_error = (
         str(oauth_health.get("detail") or "").strip()
@@ -130,12 +136,14 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
             },
             {
                 "id": "google_calendar",
-                "provider": "google",
+                "provider": "google_calendar",
                 "label": "Google Calendar",
-                "description": "Check availability and create/update calendar events.",
-                "status": "COMING_NEXT",
-                "account": None,
-                "connect_path": None,
+                "description": (f"Connection failed: {calendar_health.get('detail')}"
+                    if calendar_health.get("status") == "ERROR" and not calendar_connected
+                    else "Create events from email and watch calendar changes."),
+                "status": "CONNECTED" if calendar_connected else "AVAILABLE",
+                "account": active_calendar.provider_account_id if calendar_connected else None,
+                "connect_path": "/connections/google/calendar/start",
             },
             {
                 "id": "github",

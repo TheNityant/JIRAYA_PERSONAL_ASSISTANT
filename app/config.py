@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     gmail_pubsub_topic_name: str = ""
     gmail_pubsub_webhook_token: str = ""
     gmail_watch_auto_register: bool = True
+    calendar_background_monitor_enabled: bool = True
+    calendar_background_poll_seconds: int = Field(default=30, ge=5, le=3600)
 
 
 @lru_cache

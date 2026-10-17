@@ -162,6 +162,13 @@ class AutomationExecutor:
                 "execution": self.execution_payload(execution),
             }
 
+        if action_type == "CREATE_CALENDAR_EVENT":
+            from app.automation.calendar_action import CalendarEventAction
+            return CalendarEventAction(self).prepare(
+                automation=automation, message=message, match=match_payload,
+                correlation_id=correlation_id,
+            )
+
         if action_type != "DRAFT_REPLY":
             return {
                 "decision": "UNSUPPORTED_ACTION",
@@ -331,6 +338,9 @@ class AutomationExecutor:
         }
 
     def approve(self, *, execution: AutomationExecution, edited_draft: str | None = None) -> dict:
+        if execution.action_type == "CREATE_CALENDAR_EVENT":
+            from app.automation.calendar_action import CalendarEventAction
+            return CalendarEventAction(self).approve(execution)
         if execution.action_type != "DRAFT_REPLY":
             return {"decision": "NOT_APPROVABLE", "execution": self.execution_payload(execution)}
         if execution.approval_policy == "DRAFT_ONLY":

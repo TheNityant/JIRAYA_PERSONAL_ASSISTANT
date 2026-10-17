@@ -100,6 +100,50 @@ Core API surface:
 
 GitHub writes respect `ENABLE_EXTERNAL_ACTIONS`.
 
-## Next integration layer
+## Calendar workflows in the app
 
-These service adapters intentionally separate deterministic provider access from the automation engine. The next layer is to add Calendar and GitHub trigger/action node types to the generic automation runtime and then add polling/webhook event sources for Calendar changes and GitHub repository/workflow events.
+Calendar now appears in Connections with its own Connect/Disconnect controls. The
+Calendar tab lists upcoming primary-calendar events and the background sync state.
+Calendar authorization remains separate from Gmail; connect it once after completing
+the Google Cloud setup above.
+
+| Trigger source | Action | Behavior |
+| --- | --- | --- |
+| Gmail · New email | Create calendar event | Match email, extract a dated proposal, apply approval policy, create and read back the event |
+| Calendar · Event changed | Notify me | Incrementally sync primary-calendar changes and notify on matching events |
+
+For email-to-event automations, put your timezone and any default duration into Personal
+context (for example, `Use Asia/Kolkata. Default meeting duration: 30 minutes.`). Action
+instructions define which event to create. A clear date, start and end are required;
+missing or ambiguous scheduling information produces a notification rather than an
+invented event. The proposal is visible in the execution panel, reachable by clicking
+its notification.
+
+- **Automatic** creates the event when the safety router allows the configured action.
+- **Ask before action** saves a proposal with an Approve & Create event button.
+- **Draft only** saves the proposal without creating an event.
+- `ENABLE_EXTERNAL_ACTIONS=false` blocks all Calendar writes.
+- Automated event creation targets the primary calendar and sends no invitations.
+- A stable provider event ID prevents duplicate events during retries or forced runs.
+- Success requires reading the event back and checking its identity, title and times.
+
+For Calendar change notifications, choose Calendar as trigger source and Notify me as
+action. The first poll establishes a baseline, so existing calendar history does not
+flood notifications. Later new, updated and cancelled events are matched by event title,
+description and optional semantic condition. Deleted events may contain only an ID and
+cannot always match title/description filters. Sync expiration (HTTP 410) establishes a
+fresh baseline. Calendar change triggers currently support notifications only.
+
+Calendar monitoring runs independently of Gmail:
+
+```env
+CALENDAR_BACKGROUND_MONITOR_ENABLED=true
+CALENDAR_BACKGROUND_POLL_SECONDS=30
+```
+
+Inspect `GET /calendar/status` for monitor health or use `POST /runtime/calendar/poll`
+for a manual sync. Primary-calendar scope is fixed for this first integration.
+
+GitHub service adapters remain available through their direct API endpoints. GitHub
+trigger/action nodes and repository/workflow background monitoring are not yet wired
+into the automation engine.

@@ -21,6 +21,7 @@ import {
   GmailRuntimeStatus,
   JirayaNotification,
   Obligation,
+  ServiceStatus,
 } from "@/lib/api";
 
 const emptyAutomation: AutomationInput = {
@@ -41,7 +42,7 @@ const emptyAutomation: AutomationInput = {
   approval_policy: "REQUIRED",
 };
 
-type View = "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS";
+type View = "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS" | "CALENDAR";
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -95,7 +96,7 @@ function buildNodes(draft: AutomationInput): Node[] {
   const semantic = str(draft.match_config.semantic_condition) || "Any configured match";
   const action = str(draft.action_config.type) || "DRAFT_REPLY";
   const items = [
-    ["trigger", "Trigger", "Gmail · New email", 0, 120],
+    ["trigger", "Trigger", draft.source === "gmail" ? "Gmail · New email" : "Calendar · Event changed", 0, 120],
     ["match", "Match", semantic, 250, 120],
     ["context", "Context", str(draft.context_config.instructions) || "User context", 500, 120],
     ["action", "Action", action.replaceAll("_", " "), 750, 120],
@@ -140,6 +141,9 @@ export default function AutomationBuilder() {
   const [notificationFilter, setNotificationFilter] = useState("ALL");
   const [obligations, setObligations] = useState<Obligation[]>([]);
   const [obligationFilter, setObligationFilter] = useState<"OPEN" | "RESOLVED">("OPEN");
+  const [calendar, setCalendar] = useState<ServiceStatus | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<Awaited<ReturnType<typeof api.listCalendarEvents>>["items"]>([]);
+  const [calendarError, setCalendarError] = useState("");
   const [runtime, setRuntime] = useState<GmailRuntimeStatus | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(buildNodes(emptyAutomation));
 
@@ -154,6 +158,18 @@ export default function AutomationBuilder() {
   async function refreshConnections() {
     const response = await api.listConnections();
     setConnections(response.catalog);
+  }
+
+  async function refreshCalendar() {
+    try {
+      const service = await api.calendarStatus();
+      setCalendar(service);
+      if (service.connected) {
+        const events = await api.listCalendarEvents();
+        setCalendarEvents(events.items);
+      } else setCalendarEvents([]);
+      setCalendarError("");
+    } catch (error: any) { setCalendarError(error.message); }
   }
 
   async function refreshRuntime() {
@@ -194,17 +210,22 @@ export default function AutomationBuilder() {
   useEffect(() => {
     const delay = activeView === "AUTOMATIONS" ? 15000 : 5000;
     const timer = window.setInterval(() => {
-      if (activeView === "AUTOMATIONS") {
+      if (activeView === "CALENDAR") {
+        refreshCalendar();
+        refreshConnections().catch(() => undefined);
+      } else if (activeView === "AUTOMATIONS") {
         refreshRuntime().catch(() => undefined);
       } else {
         refreshOperations().catch(() => undefined);
       }
     }, delay);
+    if (activeView === "CALENDAR") refreshCalendar();
     if (activeView !== "AUTOMATIONS") refreshOperations().catch(() => undefined);
     return () => window.clearInterval(timer);
   }, [activeView]);
 
   const flowSignature = [
+    draft.source,
     str(draft.match_config.semantic_condition),
     str(draft.context_config.instructions),
     str(draft.action_config.type),
@@ -328,7 +349,7 @@ export default function AutomationBuilder() {
   }
 
   async function testLatestEmail() {
-    if (!selected) return;
+    if (!selected || selected.source !== "gmail") return;
     setStatus("Debug: testing latest Gmail...");
     try {
       const result = await api.previewGmail(selected.id);
@@ -341,6 +362,14 @@ export default function AutomationBuilder() {
 
   async function runLatestEmail(force = false) {
     if (!selected) return;
+    if (selected.source === "google_calendar") {
+      try {
+        const result = await api.pollCalendar();
+        setStatus(nice(result.decision));
+        await refreshOperations();
+      } catch (error: any) { setStatus(`Calendar sync failed: ${error.message}`); }
+      return;
+    }
     setStatus("Debug: running automation on latest Gmail...");
     try {
       const result = await api.runGmailAutomation(selected.id, undefined, force);
@@ -355,7 +384,7 @@ export default function AutomationBuilder() {
 
   async function approveExecution() {
     if (!runResult?.execution) return;
-    setStatus("Sending approved draft...");
+    setStatus("Executing approved action...");
     try {
       const result = await api.approveExecution(runResult.execution.id, executionDraft);
       setRunResult(result);
@@ -375,26 +404,42 @@ export default function AutomationBuilder() {
   }
 
   function connect(item: ConnectionCatalogItem) {
-    if (item.id === "gmail") window.location.href = api.googleConnectUrl();
+    const urls: Record<string, string> = {gmail: api.googleConnectUrl(), google_calendar: api.calendarConnectUrl()};
+    if (urls[item.id]) window.location.href = urls[item.id];
   }
 
-  async function disconnectGoogle() {
-    setStatus("Disconnecting Google...");
-    await api.disconnectGoogle();
-    await refreshConnections();
-    await refreshRuntime();
-    setStatus("Google disconnected");
+  async function disconnect(item: ConnectionCatalogItem) {
+    setStatus(`Disconnecting ${item.label}...`);
+    try {
+      if (item.id === "google_calendar") await api.disconnectCalendar();
+      else if (item.id === "gmail") await api.disconnectGoogle();
+      await refreshConnections();
+      await refreshRuntime();
+      await refreshCalendar();
+      setStatus(`${item.label} disconnected`);
+    } catch (error: any) { setStatus(`Disconnect failed: ${error.message}`); }
   }
 
   async function markRead(item: JirayaNotification) {
     if (!item.read_at) await api.markNotificationRead(item.id);
     await refreshOperations();
+    const executionId = item.metadata.execution_id;
+    if (typeof executionId === "string") {
+      try {
+        const result = await api.getExecution(executionId);
+        const automation = automations.find((a) => a.id === result.automation_id);
+        if (automation) selectAutomation(automation);
+        setRunResult({decision: result.status, execution: result});
+        setExecutionDraft(result.draft_body);
+        setActiveView("AUTOMATIONS");
+      } catch (error: any) { setStatus(`Execution unavailable: ${error.message}`); }
+    }
   }
 
   const execution = runResult?.execution;
   const approvable =
-    execution?.action_type === "DRAFT_REPLY" &&
-    execution.approval_policy === "REQUIRED" &&
+    ["DRAFT_REPLY", "CREATE_CALENDAR_EVENT"].includes(execution?.action_type ?? "") &&
+    execution?.approval_policy === "REQUIRED" &&
     ["AWAITING_APPROVAL", "BLOCKED_BY_POLICY"].includes(execution.status);
 
   const filteredNotifications = notifications.filter(
@@ -420,6 +465,7 @@ export default function AutomationBuilder() {
         </div>
 
         <nav className="primary-nav">
+          <button className={activeView === "CALENDAR" ? "active" : ""} onClick={() => setActiveView("CALENDAR")}>Calendar</button>
           <button className={activeView === "AUTOMATIONS" ? "active" : ""} onClick={() => setActiveView("AUTOMATIONS")}>Automations</button>
           <button className={activeView === "NOTIFICATIONS" ? "active" : ""} onClick={() => setActiveView("NOTIFICATIONS")}>
             Notifications {unreadCount > 0 && <span className="nav-badge">{unreadCount}</span>}
@@ -463,7 +509,7 @@ export default function AutomationBuilder() {
                 <span>{item.account ?? item.description}</span>
               </div>
               {item.status === "CONNECTED" ? (
-                <button className="connection-action connected" onClick={disconnectGoogle}>Connected</button>
+                <button className="connection-action connected" onClick={() => disconnect(item)} title={`Disconnect ${item.label}`}>Connected</button>
               ) : item.status === "AVAILABLE" ? (
                 <button className="connection-action" onClick={() => connect(item)}>Connect</button>
               ) : <span className="connection-coming">Soon</span>}
@@ -500,8 +546,8 @@ export default function AutomationBuilder() {
                 </span>
               </div>
               <div className="topbar-actions">
-                {selected && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
-                {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>Debug · Run latest</button>}
+                {selected?.source === "gmail" && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
+                {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : "Sync Calendar"}</button>}
                 <button className="primary-button" onClick={save} disabled={isSaving}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
               </div>
             </header>
@@ -549,6 +595,20 @@ export default function AutomationBuilder() {
                     </div>
                   </div>
                 )}
+                {execution?.action_type === "CREATE_CALENDAR_EVENT" && (
+                  <div className="draft-workspace">
+                    <strong>Proposed Calendar event</strong>
+                    {execution.output.proposal ? <>
+                      <p><strong>{str((execution.output.proposal as Record<string, unknown>).summary)}</strong></p>
+                      <p>{when(str((execution.output.proposal as Record<string, unknown>).start))} — {when(str((execution.output.proposal as Record<string, unknown>).end))}</p>
+                      <p>{str((execution.output.proposal as Record<string, unknown>).description)}</p>
+                    </> : <p>{str(execution.output.reason)}</p>}
+                    {approvable && <button className="primary-button" onClick={approveExecution}>Approve &amp; Create event</button>}
+                    {execution.status === "VERIFIED_SUCCESS" && <p>Created and verified in Calendar.</p>}
+                    {execution.status === "DRAFT_READY" && <p>Draft only: no event will be created.</p>}
+                    {execution.status === "BLOCKED_BY_POLICY" && <p>External actions are disabled.</p>}
+                  </div>
+                )}
                 {execution?.action_type === "NOTIFY" && <div className="notification-result"><strong>{str(execution.output.title) || "Jiraya notification"}</strong><p>{str(execution.output.message)}</p></div>}
               </div>
             )}
@@ -558,26 +618,44 @@ export default function AutomationBuilder() {
             <div className="inspector-heading"><span className="eyebrow">Configuration</span><h2>Automation logic</h2><p>Define what Jiraya should notice, what context it may use, and what action it may take.</p></div>
             <label>Name<input value={draft.name} onChange={(e) => updateDraft((current) => ({ ...current, name: e.target.value }))} /></label>
             <label>Description<textarea value={draft.description} onChange={(e) => updateDraft((current) => ({ ...current, description: e.target.value }))} /></label>
-            <div className="section-divider" /><span className="section-title">Match incoming Gmail</span>
+            <label>Trigger source<select value={draft.source} onChange={(e) => updateDraft((current) => ({...current,
+              source: e.target.value as AutomationInput["source"],
+              trigger_type: e.target.value === "gmail" ? "NEW_EMAIL" : "CALENDAR_CHANGED",
+              action_config: { ...current.action_config, type: e.target.value === "gmail" ? "DRAFT_REPLY" : "NOTIFY" },
+            }))}><option value="gmail">Gmail · New email</option><option value="google_calendar">Calendar · Event changed</option></select></label>
+            <div className="section-divider" /><span className="section-title">Match {draft.source === "gmail" ? "incoming Gmail" : "Calendar changes"}</span>
             <label>Semantic condition<textarea rows={5} placeholder="Example: A professor tells me an assignment/submission deadline." value={str(draft.match_config.semantic_condition)} onChange={(e) => updateMatch("semantic_condition", e.target.value)} /></label>
             <div className="two-column">
-              <label>Sender contains<input value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>
-              <label>Subject contains<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
+              <label>{draft.source === "gmail" ? "Sender contains" : "Organizer filter (email only)"}<input disabled={draft.source !== "gmail"} value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>
+              <label>{draft.source === "gmail" ? "Subject contains" : "Event title contains"}<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
             </div>
             <label>Body contains<input value={str(draft.match_config.body_contains)} onChange={(e) => updateMatch("body_contains", e.target.value)} /></label>
             <label>Personal context / operating instructions<textarea rows={4} value={str(draft.context_config.instructions)} onChange={(e) => updateContext("instructions", e.target.value)} /></label>
             <div className="section-divider" /><span className="section-title">Action &amp; policy</span>
-            <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}><option value="DRAFT_REPLY">Draft reply</option><option value="NOTIFY">Notify me</option></select></label>
+            <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>{draft.source === "gmail" && <option value="DRAFT_REPLY">Draft reply</option>}<option value="NOTIFY">Notify me</option>{draft.source === "gmail" && <option value="CREATE_CALENDAR_EVENT">Create calendar event</option>}</select></label>
+            {draft.action_config.type === "CREATE_CALENDAR_EVENT" && <div className="policy-explainer">Provide your timezone and any default event duration in context. Jiraya prepares a dated event from matching emails; unclear times produce a notification. Calendar invitations are not sent.</div>}
             <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>
             <label>Approval policy<select value={draft.approval_policy} onChange={(e) => updateDraft((current) => ({ ...current, approval_policy: e.target.value as AutomationInput["approval_policy"] }))}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>
-            {draft.approval_policy === "AUTO" && <div className="policy-explainer">Automatic means no approval prompt for a normal match. Jiraya sends when the configured action safely covers the message; changed or out-of-scope situations become a notification instead of silently switching back to approval.</div>}
-            <label className="toggle-row"><span><strong>Automation enabled</strong><small>Enabled automations are watched automatically by the Gmail runtime.</small></span><input type="checkbox" checked={draft.enabled} onChange={(e) => updateDraft((current) => ({ ...current, enabled: e.target.checked }))} /></label>
+            {draft.approval_policy === "AUTO" && <div className="policy-explainer">Automatic means no approval prompt for a normal match. Jiraya acts when the configured action safely covers the message; changed or out-of-scope situations become a notification instead of silently switching back to approval.</div>}
+            <label className="toggle-row"><span><strong>Automation enabled</strong><small>Enabled automations are watched automatically by their connected service.</small></span><input type="checkbox" checked={draft.enabled} onChange={(e) => updateDraft((current) => ({ ...current, enabled: e.target.checked }))} /></label>
             {selected && <button className="danger-link" onClick={removeSelected}>Delete automation</button>}
           </aside>
         </>
       ) : (
         <section className="operations-page">
-          {activeView === "NOTIFICATIONS" ? (
+          {activeView === "CALENDAR" ? (
+            <>
+              <header className="operations-header"><div><span className="eyebrow">Google Calendar</span><h1>Your calendar, connected</h1><p>{calendar?.connected ? calendar.account : "Connect Calendar to create events from email and watch changes."}</p></div><button onClick={refreshCalendar}>Refresh</button></header>
+              {calendarError && <p role="alert">{calendarError}</p>}
+              {!calendar?.connected && <button className="primary-button" onClick={() => {window.location.href = api.calendarConnectUrl();}}>Connect Calendar</button>}
+              {calendar?.connected && <p>{calendar.background_monitor_configured ? `Change monitoring · ${calendar.poll_seconds}s` : "Background monitoring disabled"} · {calendar.monitor?.last_decision ? nice(calendar.monitor.last_decision) : "Waiting for first cycle"}{calendar.monitor?.last_error ? ` · ${calendar.monitor.last_error}` : ""}</p>}
+              <div className="operations-list">
+                {calendarEvents.map((event) => <article className="obligation-card" key={event.id}><strong>{event.summary ?? "Untitled event"}</strong><p>{event.start?.dateTime ? when(event.start.dateTime) : event.start?.date} — {event.end?.dateTime ? when(event.end.dateTime) : event.end?.date}</p>{event.htmlLink && <a href={event.htmlLink} target="_blank" rel="noreferrer">Open in Google Calendar</a>}</article>)}
+                {calendar?.connected && !calendarEvents.length && !calendarError && <p>No upcoming events.</p>}
+              </div>
+              <p>Create a Calendar change automation with “Notify me” to receive event updates. The first sync establishes a baseline.</p>
+            </>
+          ) : activeView === "NOTIFICATIONS" ? (
             <>
               <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>“Needs you” means you have work to review. “Done by Jiraya” is a completed automatic action. FYI is informational. State changes explain obligation lifecycle updates.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
               <div className="filter-tabs">

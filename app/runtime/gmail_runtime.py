@@ -291,10 +291,20 @@ class GmailRuntimeService:
                 follow_up_reconciliation = workflow.run(action_id=action.id)
                 self._notify_reconciliation(action_id=action.id, result=follow_up_reconciliation)
 
+            # A tracked reply thread still feeds independent actions such as Calendar.
+            # Keep the existing reply reconciliator in charge of email responses.
+            independent_results = []
+            if "SENT" not in message.labels:
+                for automation in self.automations.list(source="gmail", enabled=True):
+                    action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
+                    if action_type == "CREATE_CALENDAR_EVENT":
+                        independent_results.append({"automation_id": automation.id,
+                            "result": self.executor.run(automation=automation, message_id=message.id)})
             return {
                 "message_id": message.id,
                 "thread_id": message.thread_id,
                 "path": "RECONCILIATION",
+                "calendar_results": independent_results,
                 "result": reconciliation,
                 "follow_up_result": follow_up_reconciliation,
             }

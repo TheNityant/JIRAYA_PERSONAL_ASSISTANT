@@ -48,6 +48,27 @@ class CalendarClient:
         response = self.service.events().list(**kwargs).execute()
         return list(response.get("items", []) or [])
 
+    def get_event(self, *, calendar_id: str, event_id: str) -> dict[str, Any]:
+        return self.service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+
+    def changes(self, *, calendar_id: str = "primary", sync_token: str | None = None) -> tuple[list[dict], str]:
+        items: list[dict] = []
+        page_token = None
+        while True:
+            options = {"calendarId": calendar_id, "maxResults": 2500, "showDeleted": True}
+            if sync_token:
+                options["syncToken"] = sync_token
+            if page_token:
+                options["pageToken"] = page_token
+            response = self.service.events().list(**options).execute()
+            items.extend(response.get("items", []))
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                token = response.get("nextSyncToken")
+                if not token:
+                    raise RuntimeError("Calendar did not return a sync token")
+                return items, token
+
     def freebusy(
         self,
         *,

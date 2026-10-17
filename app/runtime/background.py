@@ -77,3 +77,29 @@ async def gmail_monitor_loop(settings: Settings) -> None:
             logger.warning("Gmail background monitor cycle failed: %s", _safe_error(exc))
 
         await asyncio.sleep(settings.gmail_background_poll_seconds)
+
+
+async def calendar_monitor_loop(settings: Settings) -> None:
+    from app.runtime.calendar_runtime import CalendarRuntimeService
+
+    await asyncio.sleep(1)
+    while True:
+        def _poll_calendar():
+            with SessionLocal() as db:
+                state = RuntimeStateStore(db)
+                try:
+                    result = CalendarRuntimeService(db=db, settings=settings).poll()
+                    state.set(f"calendar-monitor-health:{settings.dev_user_id}", {
+                        "last_poll_at": _now_iso(), "last_status": "OK",
+                        "last_decision": result["decision"], "last_error": None})
+                except Exception as exc:
+                    state.set(f"calendar-monitor-health:{settings.dev_user_id}", {
+                        "last_poll_at": _now_iso(), "last_status": "ERROR",
+                        "last_error": _safe_error(exc)})
+        try:
+            await asyncio.to_thread(_poll_calendar)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Calendar background monitor cycle failed: %s", _safe_error(exc))
+        await asyncio.sleep(settings.calendar_background_poll_seconds)

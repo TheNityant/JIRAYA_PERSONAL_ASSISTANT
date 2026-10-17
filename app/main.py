@@ -10,8 +10,10 @@ from app.routes import (
     ai,
     automation_execution,
     automations,
+    calendar,
     connections,
     events,
+    github,
     gmail,
     gmail_runtime,
     health,
@@ -42,8 +44,8 @@ app = FastAPI(
     title=settings.app_name,
     version="0.5.0",
     description=(
-        "Jiraya API: persistent automations with automatic Gmail observation, notifications, "
-        "verified actions, temporal reconciliation, and obligation lifecycle tracking."
+        "Jiraya API: persistent personal automations with Gmail, Google Calendar and "
+        "GitHub connections, verified actions, temporal reconciliation, and obligations."
     ),
     lifespan=lifespan,
 )
@@ -59,6 +61,8 @@ app.include_router(ai.router)
 app.include_router(events.router)
 app.include_router(gmail.router)
 app.include_router(gmail_runtime.router)
+app.include_router(calendar.router)
+app.include_router(github.router)
 app.include_router(reconciliation.router)
 app.include_router(automations.router)
 app.include_router(automation_execution.router)
@@ -71,6 +75,6 @@ def root() -> dict:
     return {
         "name": settings.app_name,
         "version": "0.5.0",
-        "phase": "phase-2d",
+        "phase": "phase-2e",
         "docs": "/docs",
     }

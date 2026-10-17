@@ -109,6 +109,8 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
         scope in (active_calendar.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES
     ))
     calendar_health = RuntimeStateStore(db).get(f"oauth-calendar-health:{settings.dev_user_id}") or {}
+    active_github = store.get_active(user_id=settings.dev_user_id, provider="github")
+    github_health = RuntimeStateStore(db).get(f"oauth-github-health:{settings.dev_user_id}") or {}
     oauth_health = RuntimeStateStore(db).get(_oauth_state_key(settings.dev_user_id)) or {}
     oauth_error = (
         str(oauth_health.get("detail") or "").strip()
@@ -149,10 +151,12 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
                 "id": "github",
                 "provider": "github",
                 "label": "GitHub",
-                "description": "Observe repositories, workflow runs, pull requests, and issues.",
-                "status": "COMING_NEXT",
-                "account": None,
-                "connect_path": None,
+                "description": (f"Connection failed: {github_health.get('detail')}"
+                    if github_health.get("status") == "ERROR" and not active_github
+                    else "Watch repositories, create issues and branches, and run workflows."),
+                "status": "CONNECTED" if active_github else "AVAILABLE",
+                "account": active_github.provider_account_id if active_github else None,
+                "connect_path": "/connections/github/start",
             },
         ],
     }

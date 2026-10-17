@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     github_oauth_client_secret: str = ""
     github_oauth_redirect_uri: str = "http://127.0.0.1:8000/connections/github/callback"
     github_oauth_scopes: str = "repo workflow read:user"
+    github_background_monitor_enabled: bool = True
+    github_background_poll_seconds: int = Field(default=60, ge=15, le=3600)
     github_api_base_url: str = "https://api.github.com"
 
     gmail_credentials_path: str = "credentials.json"

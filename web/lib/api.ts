@@ -3,8 +3,8 @@ export type Automation = {
   name: string;
   description: string;
   enabled: boolean;
-  source: "gmail" | "google_calendar";
-  trigger_type: "NEW_EMAIL" | "CALENDAR_CHANGED";
+  source: "gmail" | "google_calendar" | "github";
+  trigger_type: "NEW_EMAIL" | "CALENDAR_CHANGED" | "GITHUB_ISSUE_CHANGED" | "GITHUB_PR_CHANGED" | "GITHUB_WORKFLOW_CHANGED";
   match_config: Record<string, unknown>;
   context_config: Record<string, unknown>;
   action_config: Record<string, unknown>;
@@ -87,6 +87,9 @@ export type ConnectionsResponse = {
   }>;
   catalog: ConnectionCatalogItem[];
 };
+
+export type GithubRepository = {id: number; full_name: string; html_url: string; default_branch: string; private: boolean};
+export type GithubItem = {id: number; number?: number; title?: string; name?: string; body?: string; state?: string; status?: string; conclusion?: string; html_url?: string; pull_request?: unknown};
 
 export type ServiceStatus = {
   connected: boolean;
@@ -212,6 +215,7 @@ export const api = {
   githubConnectUrl: () => `${API_BASE}/connections/github/start`,
   pollCalendar: () => request<{decision: string}>("/runtime/calendar/poll", { method: "POST" }),
   calendarStatus: () => request<ServiceStatus>("/calendar/status"),
+  pollGithub: () => request<{decision: string}>("/runtime/github/poll", {method: "POST"}),
   githubStatus: () => request<ServiceStatus>("/github/status"),
   disconnectCalendar: () =>
     request<{ disconnected: boolean; provider: string }>("/connections/google/calendar/disconnect", {
@@ -227,9 +231,13 @@ export const api = {
   createCalendarEvent: (input: Record<string, unknown>) =>
     request<any>("/calendar/events", { method: "POST", body: JSON.stringify(input) }),
   githubProfile: () => request<any>("/github/profile"),
-  listGithubRepos: (limit = 30) => request<any>(`/github/repos?limit=${limit}`),
+  listGithubRepos: (limit = 30) => request<{items: GithubRepository[]}>(`/github/repos?limit=${limit}`),
   listGithubWorkflowRuns: (owner: string, repo: string, limit = 20) =>
-    request<any>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflow-runs?limit=${limit}`),
+    request<{items: GithubItem[]}>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflow-runs?limit=${limit}`),
+  listGithubIssues: (owner: string, repo: string) => request<{items: GithubItem[]}>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=all`),
+  listGithubPulls: (owner: string, repo: string) => request<{items: GithubItem[]}>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`),
+  dispatchGithubWorkflow: (owner: string, repo: string, input: {workflow_id: string; ref: string; inputs: Record<string, string>}) =>
+    request<{dispatched: boolean}>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflow-dispatch`, {method: "POST", body: JSON.stringify(input)}),
   createGithubIssue: (owner: string, repo: string, input: { title: string; body?: string }) =>
     request<any>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`, {
       method: "POST",

@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -25,6 +26,19 @@ class GitHubClient:
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
+
+    def close(self) -> None:
+        self.client.close()
+
+    def get_issue(self, *, owner: str, repo: str, number: int) -> dict:
+        return self._request("GET", f"/repos/{owner}/{repo}/issues/{number}")
+
+    def get_branch_ref(self, *, owner: str, repo: str, branch: str) -> dict:
+        return self._request("GET", f"/repos/{owner}/{repo}/git/ref/heads/{quote(branch, safe='')}")
+
+    def list_pulls(self, *, owner: str, repo: str, limit: int = 100) -> list[dict]:
+        return self._request("GET", f"/repos/{owner}/{repo}/pulls",
+            params={"state": "all", "sort": "updated", "direction": "desc", "per_page": limit}) or []
 
     def get_user(self) -> dict[str, Any]:
         return self._request("GET", "/user")
@@ -74,7 +88,7 @@ class GitHubClient:
             self._request(
                 "GET",
                 f"/repos/{owner}/{repo}/issues",
-                params={"per_page": max(1, min(limit, 100)), "state": state},
+                params={"per_page": max(1, min(limit, 100)), "state": state, "sort": "updated", "direction": "desc"},
             )
             or []
         )
@@ -94,10 +108,7 @@ class GitHubClient:
         new_branch: str,
         from_ref: str,
     ) -> dict[str, Any]:
-        source = self._request(
-            "GET",
-            f"/repos/{owner}/{repo}/git/ref/heads/{from_ref}",
-        )
+        source = self.get_branch_ref(owner=owner, repo=repo, branch=from_ref)
         sha = str(((source or {}).get("object") or {}).get("sha") or "")
         if not sha:
             raise RuntimeError(f"Could not resolve GitHub source branch {from_ref!r}.")
@@ -118,6 +129,10 @@ class GitHubClient:
     ) -> None:
         self._request(
             "POST",
-            f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches",
+            f"/repos/{owner}/{repo}/actions/workflows/{quote(workflow_id, safe='')}/dispatches",
             json={"ref": ref, "inputs": inputs or {}},
         )
+
+    def create_branch_at_sha(self, *, owner: str, repo: str, branch: str, sha: str) -> dict:
+        return self._request("POST", f"/repos/{owner}/{repo}/git/refs",
+            json={"ref": f"refs/heads/{branch}", "sha": sha})

@@ -6,3 +6,5 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ["ENABLE_EXTERNAL_ACTIONS"] = "false"
 os.environ["GMAIL_BACKGROUND_MONITOR_ENABLED"] = "false"
 os.environ["CALENDAR_BACKGROUND_MONITOR_ENABLED"] = "false"
+
+os.environ["GITHUB_BACKGROUND_MONITOR_ENABLED"] = "false"

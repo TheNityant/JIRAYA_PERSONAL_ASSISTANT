@@ -297,7 +297,7 @@ class GmailRuntimeService:
             if "SENT" not in message.labels:
                 for automation in self.automations.list(source="gmail", enabled=True):
                     action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
-                    if action_type == "CREATE_CALENDAR_EVENT":
+                    if action_type in {"CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
                         independent_results.append({"automation_id": automation.id,
                             "result": self.executor.run(automation=automation, message_id=message.id)})
             return {

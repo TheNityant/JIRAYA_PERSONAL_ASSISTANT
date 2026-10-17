@@ -66,7 +66,7 @@ def approve_automation_execution(
     if execution is None:
         raise HTTPException(status_code=404, detail="Automation execution not found")
     try:
-        return _executor(db, require_gmail=execution.action_type != "CREATE_CALENDAR_EVENT").approve(
+        return _executor(db, require_gmail=execution.action_type == "DRAFT_REPLY").approve(
             execution=execution, edited_draft=request.draft_body)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

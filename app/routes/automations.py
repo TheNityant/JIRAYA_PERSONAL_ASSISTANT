@@ -8,6 +8,7 @@ from app.automation.matcher import AutomationMatcher
 from app.config import get_settings
 from app.db import get_db
 from app.integrations.gmail.connection import get_gmail_client
+from app.integrations.github.validation import repository_parts, validate_branch
 from app.models import Automation
 from app.providers.nebius import NebiusProvider
 from app.services.automation_store import AutomationStore
@@ -19,8 +20,8 @@ class AutomationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str = Field(default="", max_length=1000)
     enabled: bool = True
-    source: Literal["gmail", "google_calendar"] = "gmail"
-    trigger_type: Literal["NEW_EMAIL", "CALENDAR_CHANGED"] = "NEW_EMAIL"
+    source: Literal["gmail", "google_calendar", "github"] = "gmail"
+    trigger_type: Literal["NEW_EMAIL", "CALENDAR_CHANGED", "GITHUB_ISSUE_CHANGED", "GITHUB_PR_CHANGED", "GITHUB_WORKFLOW_CHANGED"] = "NEW_EMAIL"
     match_config: dict[str, Any] = Field(default_factory=dict)
     context_config: dict[str, Any] = Field(default_factory=dict)
     action_config: dict[str, Any] = Field(default_factory=dict)
@@ -31,8 +32,8 @@ class AutomationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=1000)
     enabled: bool | None = None
-    source: Literal["gmail", "google_calendar"] | None = None
-    trigger_type: Literal["NEW_EMAIL", "CALENDAR_CHANGED"] | None = None
+    source: Literal["gmail", "google_calendar", "github"] | None = None
+    trigger_type: Literal["NEW_EMAIL", "CALENDAR_CHANGED", "GITHUB_ISSUE_CHANGED", "GITHUB_PR_CHANGED", "GITHUB_WORKFLOW_CHANGED"] | None = None
     match_config: dict[str, Any] | None = None
     context_config: dict[str, Any] | None = None
     action_config: dict[str, Any] | None = None
@@ -73,6 +74,11 @@ def automation_capabilities() -> dict:
             },
             {"id": "google_calendar", "label": "Google Calendar", "status": "AVAILABLE",
              "triggers": [{"id": "CALENDAR_CHANGED", "label": "Calendar event changed"}]},
+            {"id": "github", "label": "GitHub", "status": "AVAILABLE", "triggers": [
+                {"id": "GITHUB_ISSUE_CHANGED", "label": "Issue changed"},
+                {"id": "GITHUB_PR_CHANGED", "label": "Pull request changed"},
+                {"id": "GITHUB_WORKFLOW_CHANGED", "label": "Workflow run changed"},
+            ]},
         ],
         "matchers": [
             {"id": "sender_contains", "label": "Sender contains", "kind": "DETERMINISTIC"},
@@ -84,10 +90,12 @@ def automation_capabilities() -> dict:
             {"id": "DRAFT_REPLY", "label": "Draft reply", "status": "CONFIGURABLE"},
             {"id": "NOTIFY", "label": "Notify me", "status": "CONFIGURABLE"},
             {"id": "CREATE_CALENDAR_EVENT", "label": "Create calendar event", "status": "CONFIGURABLE"},
+            {"id": "CREATE_GITHUB_ISSUE", "label": "Create GitHub issue", "status": "CONFIGURABLE"},
+            {"id": "CREATE_GITHUB_BRANCH", "label": "Create GitHub branch", "status": "CONFIGURABLE"},
         ],
         "approval_policies": ["DRAFT_ONLY", "REQUIRED", "AUTO"],
         "system_nodes": ["VERIFIER", "RECONCILIATOR", "OBLIGATION"],
-        "coming_next": ["github"],
+        "coming_next": [],
     }
 
 
@@ -95,10 +103,23 @@ def _validate_logic(values: dict) -> None:
     source = values["source"]
     trigger = values["trigger_type"]
     action = (values.get("action_config") or {}).get("type", "DRAFT_REPLY")
-    if (source, trigger) not in {("gmail", "NEW_EMAIL"), ("google_calendar", "CALENDAR_CHANGED")}:
+    allowed = {("gmail", "NEW_EMAIL"), ("google_calendar", "CALENDAR_CHANGED"),
+               ("github", "GITHUB_ISSUE_CHANGED"), ("github", "GITHUB_PR_CHANGED"),
+               ("github", "GITHUB_WORKFLOW_CHANGED")}
+    if (source, trigger) not in allowed:
         raise HTTPException(status_code=422, detail="Trigger does not belong to the selected source")
-    if action not in {"DRAFT_REPLY", "NOTIFY", "CREATE_CALENDAR_EVENT"}:
+    if action not in {"DRAFT_REPLY", "NOTIFY", "CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
         raise HTTPException(status_code=422, detail="Unsupported action")
+    if source == "github" and action != "NOTIFY":
+        raise HTTPException(status_code=422, detail="GitHub change triggers support Notify me")
+    if source == "github" or action in {"CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
+        try:
+            repository_parts(str((values.get("action_config") or {}).get("repository") or ""))
+            if action == "CREATE_GITHUB_BRANCH":
+                validate_branch(str(values["action_config"].get("branch") or ""))
+                validate_branch(str(values["action_config"].get("from_ref") or "main"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if source == "google_calendar" and action != "NOTIFY":
         raise HTTPException(status_code=422, detail="Calendar change triggers support Notify me")
 

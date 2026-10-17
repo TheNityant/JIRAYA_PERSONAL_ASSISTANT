@@ -144,6 +144,49 @@ CALENDAR_BACKGROUND_POLL_SECONDS=30
 Inspect `GET /calendar/status` for monitor health or use `POST /runtime/calendar/poll`
 for a manual sync. Primary-calendar scope is fixed for this first integration.
 
-GitHub service adapters remain available through their direct API endpoints. GitHub
-trigger/action nodes and repository/workflow background monitoring are not yet wired
-into the automation engine.
+## GitHub workflows in the app
+
+GitHub appears in Connections with independent Connect/Disconnect controls. The GitHub
+tab lets you select an accessible repository, inspect issues, pull requests and workflow
+runs, create issues/branches, and request workflow dispatches. The repository picker
+lists the most recently updated 100 repositories accessible to the connected account.
+For other repositories, enter `owner/name` directly in an automation's repository field.
+
+| Trigger | Action | Behavior |
+| --- | --- | --- |
+| GitHub issue changed | Notify me | Watch new or updated issues in one configured repository |
+| GitHub pull request changed | Notify me | Watch PR state/content updates in one configured repository |
+| GitHub workflow run changed | Notify me | Observe run status/conclusion changes in one configured repository |
+| Gmail · New email | Create GitHub issue | Prepare an issue in a fixed user-selected repository, apply policy, create and read back |
+| Gmail · New email | Create GitHub branch | Create a configured branch from a configured source branch, then verify its ref/SHA |
+
+GitHub change triggers currently support notifications only. Set the repository in each
+automation, then optionally filter title/body or supply a semantic condition such as
+`A workflow run has completed with a failure`. The first poll baselines current activity;
+it does not create notifications for existing history. Monitoring scans the most recent
+100 activity items per repository and trigger on each cycle; brief intermediate states
+or activity outside that window may not be observed. This is a local polling integration,
+not an exhaustive webhook event archive. PR reviews/comments without a corresponding PR
+update are not separate event triggers in this version.
+
+Email-to-GitHub actions support Automatic, Ask before action, and Draft only. Repository
+and branch names are fixed by the user's configuration, never taken from model output.
+Click a proposal notification to inspect it and approve when required. All writes honor
+`ENABLE_EXTERNAL_ACTIONS`. A durable database claim prevents duplicate automatic writes,
+including when the API response is lost. An uncertain outcome stays unobserved and needs
+manual inspection rather than sending the same issue creation request again.
+
+Workflow dispatch is available as an explicit action in the GitHub tab. The selected
+workflow must define `workflow_dispatch`; enter its filename or numeric ID, a ref, and
+any supported inputs. A dispatch acknowledgement means the run was requested, not that
+the run succeeded. Inspect workflow runs or configure a run-change notification to observe
+the actual result. Workflow dispatch is not currently an automated Gmail action.
+
+```env
+GITHUB_BACKGROUND_MONITOR_ENABLED=true
+GITHUB_BACKGROUND_POLL_SECONDS=60
+```
+
+Inspect `GET /github/status` for monitor health, or use `POST /runtime/github/poll`
+for a manual poll. A repository-access failure is reported without stopping other
+configured repositories. GitHub OAuth setup and the callback URL are listed above.

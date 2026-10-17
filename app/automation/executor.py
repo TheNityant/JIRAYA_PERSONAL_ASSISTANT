@@ -162,6 +162,11 @@ class AutomationExecutor:
                 "execution": self.execution_payload(execution),
             }
 
+        if action_type in {"CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
+            from app.automation.github_action import GitHubAction
+            return GitHubAction(self).prepare(automation=automation, message=message,
+                match=match_payload, correlation_id=correlation_id)
+
         if action_type == "CREATE_CALENDAR_EVENT":
             from app.automation.calendar_action import CalendarEventAction
             return CalendarEventAction(self).prepare(
@@ -338,6 +343,9 @@ class AutomationExecutor:
         }
 
     def approve(self, *, execution: AutomationExecution, edited_draft: str | None = None) -> dict:
+        if execution.action_type in {"CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
+            from app.automation.github_action import GitHubAction
+            return GitHubAction(self).approve(execution)
         if execution.action_type == "CREATE_CALENDAR_EVENT":
             from app.automation.calendar_action import CalendarEventAction
             return CalendarEventAction(self).approve(execution)

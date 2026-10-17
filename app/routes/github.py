@@ -3,13 +3,14 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
 from app.integrations.github.client import GitHubClient
 from app.integrations.github.connection import get_github_client
+from app.integrations.github.validation import validate_branch
 from app.integrations.github.oauth import (
     build_github_authorization_url,
     exchange_github_code,
@@ -139,6 +140,9 @@ def github_status(db: Session = Depends(get_db)) -> dict:
         "scopes": list(connection.scopes or []) if connection else [],
         "oauth_configured": bool(settings.github_oauth_client_id and settings.github_oauth_client_secret),
         "health": RuntimeStateStore(db).get(_health_key(settings.dev_user_id)) or {},
+        "monitor": RuntimeStateStore(db).get(f"github-monitor-health:{settings.dev_user_id}") or {},
+        "background_monitor_configured": settings.github_background_monitor_enabled,
+        "poll_seconds": settings.github_background_poll_seconds,
     }
 
 
@@ -202,6 +206,20 @@ def github_issues(
         raise HTTPException(status_code=503, detail=f"GitHub unavailable: {type(exc).__name__}: {exc}") from exc
 
 
+@router.get("/github/repos/{owner}/{repo}/pulls")
+def github_pulls(owner: str, repo: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return {"items": get_github_client(db, get_settings()).list_pulls(owner=owner, repo=repo)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"GitHub unavailable: {type(exc).__name__}") from exc
+
+
+@router.post("/runtime/github/poll")
+def poll_github(db: Session = Depends(get_db)) -> dict:
+    from app.runtime.github_runtime import GitHubRuntimeService
+    return GitHubRuntimeService(db=db, settings=get_settings()).poll()
+
+
 class GitHubIssueRequest(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     body: str = ""
@@ -211,10 +229,15 @@ class GitHubBranchRequest(BaseModel):
     new_branch: str = Field(min_length=1, max_length=240)
     from_ref: str = "main"
 
+    @field_validator("new_branch", "from_ref")
+    @classmethod
+    def valid_ref(cls, value: str) -> str:
+        return validate_branch(value)
+
 
 class GitHubWorkflowDispatchRequest(BaseModel):
-    workflow_id: str
-    ref: str = "main"
+    workflow_id: str = Field(min_length=1, max_length=255)
+    ref: str = Field(default="main", min_length=1, max_length=255)
     inputs: dict[str, str] = Field(default_factory=dict)
 
 

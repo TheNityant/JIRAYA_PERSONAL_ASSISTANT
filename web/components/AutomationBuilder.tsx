@@ -1,5 +1,7 @@
 "use client";
 
+import GitHubWorkspace from "@/components/GitHubWorkspace";
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Background,
@@ -42,7 +44,7 @@ const emptyAutomation: AutomationInput = {
   approval_policy: "REQUIRED",
 };
 
-type View = "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS" | "CALENDAR";
+type View = "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS" | "CALENDAR" | "GITHUB";
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -96,7 +98,7 @@ function buildNodes(draft: AutomationInput): Node[] {
   const semantic = str(draft.match_config.semantic_condition) || "Any configured match";
   const action = str(draft.action_config.type) || "DRAFT_REPLY";
   const items = [
-    ["trigger", "Trigger", draft.source === "gmail" ? "Gmail · New email" : "Calendar · Event changed", 0, 120],
+    ["trigger", "Trigger", draft.source === "gmail" ? "Gmail · New email" : draft.source === "github" ? `GitHub · ${nice(draft.trigger_type.replace(/^GITHUB_/, ""))}` : "Calendar · Event changed", 0, 120],
     ["match", "Match", semantic, 250, 120],
     ["context", "Context", str(draft.context_config.instructions) || "User context", 500, 120],
     ["action", "Action", action.replaceAll("_", " "), 750, 120],
@@ -226,6 +228,7 @@ export default function AutomationBuilder() {
 
   const flowSignature = [
     draft.source,
+    draft.trigger_type,
     str(draft.match_config.semantic_condition),
     str(draft.context_config.instructions),
     str(draft.action_config.type),
@@ -362,6 +365,11 @@ export default function AutomationBuilder() {
 
   async function runLatestEmail(force = false) {
     if (!selected) return;
+    if (selected.source === "github") {
+      try { const result = await api.pollGithub(); setStatus(nice(result.decision)); await refreshOperations(); }
+      catch (error: any) { setStatus(`GitHub sync failed: ${error.message}`); }
+      return;
+    }
     if (selected.source === "google_calendar") {
       try {
         const result = await api.pollCalendar();
@@ -404,7 +412,7 @@ export default function AutomationBuilder() {
   }
 
   function connect(item: ConnectionCatalogItem) {
-    const urls: Record<string, string> = {gmail: api.googleConnectUrl(), google_calendar: api.calendarConnectUrl()};
+    const urls: Record<string, string> = {gmail: api.googleConnectUrl(), google_calendar: api.calendarConnectUrl(), github: api.githubConnectUrl()};
     if (urls[item.id]) window.location.href = urls[item.id];
   }
 
@@ -413,6 +421,7 @@ export default function AutomationBuilder() {
     try {
       if (item.id === "google_calendar") await api.disconnectCalendar();
       else if (item.id === "gmail") await api.disconnectGoogle();
+      else if (item.id === "github") await api.disconnectGithub();
       await refreshConnections();
       await refreshRuntime();
       await refreshCalendar();
@@ -438,7 +447,7 @@ export default function AutomationBuilder() {
 
   const execution = runResult?.execution;
   const approvable =
-    ["DRAFT_REPLY", "CREATE_CALENDAR_EVENT"].includes(execution?.action_type ?? "") &&
+    ["DRAFT_REPLY", "CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"].includes(execution?.action_type ?? "") &&
     execution?.approval_policy === "REQUIRED" &&
     ["AWAITING_APPROVAL", "BLOCKED_BY_POLICY"].includes(execution.status);
 
@@ -465,6 +474,7 @@ export default function AutomationBuilder() {
         </div>
 
         <nav className="primary-nav">
+          <button className={activeView === "GITHUB" ? "active" : ""} onClick={() => setActiveView("GITHUB")}>GitHub</button>
           <button className={activeView === "CALENDAR" ? "active" : ""} onClick={() => setActiveView("CALENDAR")}>Calendar</button>
           <button className={activeView === "AUTOMATIONS" ? "active" : ""} onClick={() => setActiveView("AUTOMATIONS")}>Automations</button>
           <button className={activeView === "NOTIFICATIONS" ? "active" : ""} onClick={() => setActiveView("NOTIFICATIONS")}>
@@ -547,7 +557,7 @@ export default function AutomationBuilder() {
               </div>
               <div className="topbar-actions">
                 {selected?.source === "gmail" && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
-                {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : "Sync Calendar"}</button>}
+                {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : selected.source === "github" ? "Sync GitHub" : "Sync Calendar"}</button>}
                 <button className="primary-button" onClick={save} disabled={isSaving}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
               </div>
             </header>
@@ -595,6 +605,18 @@ export default function AutomationBuilder() {
                     </div>
                   </div>
                 )}
+                {execution && ["CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"].includes(execution.action_type) && <div className="draft-workspace">
+                  <strong>GitHub proposal · {str(execution.output.repository)}</strong>
+                  {execution.output.proposal ? <>
+                    <p>{str((execution.output.proposal as Record<string, unknown>).title) || `Create branch ${str((execution.output.proposal as Record<string, unknown>).branch)} from ${str((execution.output.proposal as Record<string, unknown>).from_ref)}`}</p>
+                    <p style={{whiteSpace: "pre-wrap"}}>{str((execution.output.proposal as Record<string, unknown>).body)}</p>
+                  </> : <p>{str(execution.output.reason)}</p>}
+                  {approvable && <button className="primary-button" onClick={approveExecution}>Approve GitHub action</button>}
+                  {execution.status === "DRAFT_READY" && <p>Draft only: GitHub will not be changed.</p>}
+                  {execution.status === "BLOCKED_BY_POLICY" && <p>External actions are disabled.</p>}
+                  {execution.status === "VERIFIED_SUCCESS" && <p>Completed and verified on GitHub.</p>}
+                  {execution.status === "UNOBSERVED" && <p>Outcome needs review. Check GitHub before taking further action.</p>}
+                </div>}
                 {execution?.action_type === "CREATE_CALENDAR_EVENT" && (
                   <div className="draft-workspace">
                     <strong>Proposed Calendar event</strong>
@@ -620,19 +642,25 @@ export default function AutomationBuilder() {
             <label>Description<textarea value={draft.description} onChange={(e) => updateDraft((current) => ({ ...current, description: e.target.value }))} /></label>
             <label>Trigger source<select value={draft.source} onChange={(e) => updateDraft((current) => ({...current,
               source: e.target.value as AutomationInput["source"],
-              trigger_type: e.target.value === "gmail" ? "NEW_EMAIL" : "CALENDAR_CHANGED",
+              trigger_type: e.target.value === "gmail" ? "NEW_EMAIL" : e.target.value === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
               action_config: { ...current.action_config, type: e.target.value === "gmail" ? "DRAFT_REPLY" : "NOTIFY" },
-            }))}><option value="gmail">Gmail · New email</option><option value="google_calendar">Calendar · Event changed</option></select></label>
-            <div className="section-divider" /><span className="section-title">Match {draft.source === "gmail" ? "incoming Gmail" : "Calendar changes"}</span>
+            }))}><option value="gmail">Gmail · New email</option><option value="google_calendar">Calendar · Event changed</option><option value="github">GitHub · Repository changes</option></select></label>
+            {draft.source === "github" && <label>GitHub event<select value={draft.trigger_type} onChange={(e) => updateDraft((current) => ({...current, trigger_type: e.target.value as AutomationInput["trigger_type"]}))}><option value="GITHUB_ISSUE_CHANGED">Issue changed</option><option value="GITHUB_PR_CHANGED">Pull request changed</option><option value="GITHUB_WORKFLOW_CHANGED">Workflow run changed</option></select></label>}
+            {(draft.source === "github" || ["CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"].includes(str(draft.action_config.type))) && <label>GitHub repository<input placeholder="TheNityant/repository-name" value={str(draft.action_config.repository)} onChange={(e) => updateAction("repository", e.target.value)}/></label>}
+            <div className="section-divider" /><span className="section-title">Match {draft.source === "gmail" ? "incoming Gmail" : draft.source === "github" ? "GitHub changes" : "Calendar changes"}</span>
             <label>Semantic condition<textarea rows={5} placeholder="Example: A professor tells me an assignment/submission deadline." value={str(draft.match_config.semantic_condition)} onChange={(e) => updateMatch("semantic_condition", e.target.value)} /></label>
             <div className="two-column">
               <label>{draft.source === "gmail" ? "Sender contains" : "Organizer filter (email only)"}<input disabled={draft.source !== "gmail"} value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>
-              <label>{draft.source === "gmail" ? "Subject contains" : "Event title contains"}<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
+              <label>{draft.source === "gmail" ? "Subject contains" : draft.source === "github" ? "Issue / workflow title contains" : "Event title contains"}<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
             </div>
             <label>Body contains<input value={str(draft.match_config.body_contains)} onChange={(e) => updateMatch("body_contains", e.target.value)} /></label>
             <label>Personal context / operating instructions<textarea rows={4} value={str(draft.context_config.instructions)} onChange={(e) => updateContext("instructions", e.target.value)} /></label>
             <div className="section-divider" /><span className="section-title">Action &amp; policy</span>
-            <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>{draft.source === "gmail" && <option value="DRAFT_REPLY">Draft reply</option>}<option value="NOTIFY">Notify me</option>{draft.source === "gmail" && <option value="CREATE_CALENDAR_EVENT">Create calendar event</option>}</select></label>
+            <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>{draft.source === "gmail" && <option value="DRAFT_REPLY">Draft reply</option>}<option value="NOTIFY">Notify me</option>{draft.source === "gmail" && <><option value="CREATE_CALENDAR_EVENT">Create calendar event</option><option value="CREATE_GITHUB_ISSUE">Create GitHub issue</option><option value="CREATE_GITHUB_BRANCH">Create GitHub branch</option></>}</select></label>
+            {draft.action_config.type === "CREATE_GITHUB_BRANCH" && <>
+              <label>New GitHub branch<input value={str(draft.action_config.branch)} onChange={(e) => updateAction("branch", e.target.value)} placeholder="feature/email-follow-up"/></label>
+              <label>Source GitHub branch<input value={str(draft.action_config.from_ref) || "main"} onChange={(e) => updateAction("from_ref", e.target.value)}/></label>
+            </>}
             {draft.action_config.type === "CREATE_CALENDAR_EVENT" && <div className="policy-explainer">Provide your timezone and any default event duration in context. Jiraya prepares a dated event from matching emails; unclear times produce a notification. Calendar invitations are not sent.</div>}
             <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>
             <label>Approval policy<select value={draft.approval_policy} onChange={(e) => updateDraft((current) => ({ ...current, approval_policy: e.target.value as AutomationInput["approval_policy"] }))}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>
@@ -643,7 +671,7 @@ export default function AutomationBuilder() {
         </>
       ) : (
         <section className="operations-page">
-          {activeView === "CALENDAR" ? (
+          {activeView === "GITHUB" ? <GitHubWorkspace /> : activeView === "CALENDAR" ? (
             <>
               <header className="operations-header"><div><span className="eyebrow">Google Calendar</span><h1>Your calendar, connected</h1><p>{calendar?.connected ? calendar.account : "Connect Calendar to create events from email and watch changes."}</p></div><button onClick={refreshCalendar}>Refresh</button></header>
               {calendarError && <p role="alert">{calendarError}</p>}

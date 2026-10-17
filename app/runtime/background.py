@@ -103,3 +103,32 @@ async def calendar_monitor_loop(settings: Settings) -> None:
         except Exception as exc:
             logger.warning("Calendar background monitor cycle failed: %s", _safe_error(exc))
         await asyncio.sleep(settings.calendar_background_poll_seconds)
+
+
+async def github_monitor_loop(settings: Settings) -> None:
+    from app.runtime.github_runtime import GitHubRuntimeService
+
+    await asyncio.sleep(1)
+    while True:
+        def _poll_github():
+            with SessionLocal() as db:
+                state = RuntimeStateStore(db)
+                try:
+                    result = GitHubRuntimeService(db=db, settings=settings).poll()
+                    state.set(f"github-monitor-health:{settings.dev_user_id}", {
+                        "last_poll_at": _now_iso(),
+                        "last_status": "ERROR" if result.get("errors") else "OK",
+                        "last_decision": result["decision"],
+                        "last_error": "Some repository checks failed. Check repository access and GitHub permissions."
+                            if result.get("errors") else None})
+                except Exception as exc:
+                    db.rollback()
+                    state.set(f"github-monitor-health:{settings.dev_user_id}", {
+                        "last_poll_at": _now_iso(), "last_status": "ERROR", "last_error": _safe_error(exc)})
+        try:
+            await asyncio.to_thread(_poll_github)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("GitHub background monitor cycle failed: %s", _safe_error(exc))
+        await asyncio.sleep(settings.github_background_poll_seconds)

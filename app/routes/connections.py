@@ -44,6 +44,13 @@ def _oauth_state_key(user_id: str) -> str:
     return f"oauth-google-health:{user_id}"
 
 
+def _oauth_pkce_key(state: str) -> str:
+    # The state value is already a random, short-lived server-generated nonce. Keeping the
+    # verifier in server-side RuntimeState avoids adding a schema migration just for an
+    # in-flight OAuth exchange and lets us delete it immediately after the callback.
+    return f"oauth-google-pkce:{state}"
+
+
 def _safe_oauth_error(exc: Exception) -> str:
     """Return useful OAuth diagnostics while redacting credential-like values."""
     kind = type(exc).__name__
@@ -167,10 +174,25 @@ def start_google_connection(
             status="AUTHORIZING",
             detail=None,
         )
-        flow = build_google_oauth_flow(settings, state=state_record.state)
+
+        # Explicitly use PKCE and persist its verifier server-side. google-auth-oauthlib
+        # adds the code_challenge to the authorization request only after
+        # authorization_url() is called, so the verifier must be captured afterwards.
+        flow = build_google_oauth_flow(
+            settings,
+            state=state_record.state,
+            autogenerate_code_verifier=True,
+        )
         authorization_url, _ = flow.authorization_url(
             access_type="offline",
             prompt="consent",
+        )
+        code_verifier = str(flow.code_verifier or "")
+        if not code_verifier:
+            raise RuntimeError("Google OAuth PKCE verifier was not generated.")
+        RuntimeStateStore(db).set(
+            _oauth_pkce_key(state_record.state),
+            {"code_verifier": code_verifier},
         )
     except RuntimeError as exc:
         detail = _safe_oauth_error(exc)
@@ -194,9 +216,14 @@ def google_connection_callback(
 ):
     settings = get_settings()
     store = ConnectionStore(db)
+    runtime_state = RuntimeStateStore(db)
+    pkce_key = _oauth_pkce_key(state)
+    pkce_state = runtime_state.get(pkce_key) or {}
+    code_verifier = str(pkce_state.get("code_verifier") or "")
 
     state_record = store.consume_oauth_state(state=state, provider="google")
     if state_record is None:
+        runtime_state.delete(pkce_key)
         detail = "invalid_or_expired_state"
         _record_oauth_health(
             db,
@@ -206,6 +233,7 @@ def google_connection_callback(
         )
         return _frontend_redirect(status="error", provider="google", detail=detail)
     if error:
+        runtime_state.delete(pkce_key)
         detail = f"GoogleAuthorizationError: {str(error)[:240]}"
         _record_oauth_health(
             db,
@@ -215,7 +243,17 @@ def google_connection_callback(
         )
         return _frontend_redirect(status="error", provider="google", detail=detail)
     if not code:
+        runtime_state.delete(pkce_key)
         detail = "missing_code"
+        _record_oauth_health(
+            db,
+            user_id=state_record.user_id,
+            status="ERROR",
+            detail=detail,
+        )
+        return _frontend_redirect(status="error", provider="google", detail=detail)
+    if not code_verifier:
+        detail = "pkce_verifier_missing_or_expired"
         _record_oauth_health(
             db,
             user_id=state_record.user_id,
@@ -228,7 +266,14 @@ def google_connection_callback(
         if settings.app_env.lower() == "development":
             os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
-        flow = build_google_oauth_flow(settings, state=state)
+        # Recreate the callback Flow with the exact verifier that produced the challenge
+        # in /google/start. Without this, Google returns invalid_grant: Missing code verifier.
+        flow = build_google_oauth_flow(
+            settings,
+            state=state,
+            code_verifier=code_verifier,
+            autogenerate_code_verifier=False,
+        )
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
@@ -267,7 +312,7 @@ def google_connection_callback(
             token_expires_at=credentials.expiry,
             metadata=metadata,
         )
-        RuntimeStateStore(db).set(
+        runtime_state.set(
             f"gmail-history:{state_record.user_id}",
             {
                 "history_id": history_id,
@@ -296,6 +341,9 @@ def google_connection_callback(
             provider="google",
             detail=detail,
         )
+    finally:
+        # PKCE verifiers are single-use OAuth transaction material. Do not retain them.
+        runtime_state.delete(pkce_key)
 
     return _frontend_redirect(status="connected", provider="google")
 

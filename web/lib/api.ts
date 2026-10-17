@@ -67,7 +67,7 @@ export type ConnectionCatalogItem = {
   provider: string;
   label: string;
   description: string;
-  status: "AVAILABLE" | "CONNECTED" | "COMING_NEXT";
+  status: "AVAILABLE" | "CONNECTED" | "COMING_NEXT" | "SETUP_REQUIRED";
   account: string | null;
   connect_path: string | null;
 };
@@ -86,6 +86,14 @@ export type ConnectionsResponse = {
     updated_at: string;
   }>;
   catalog: ConnectionCatalogItem[];
+};
+
+export type ServiceStatus = {
+  connected: boolean;
+  account: string | null;
+  scopes: string[];
+  oauth_configured: boolean;
+  health: Record<string, unknown>;
 };
 
 export type JirayaNotification = {
@@ -197,6 +205,37 @@ export const api = {
       method: "POST",
     }),
   googleConnectUrl: () => `${API_BASE}/connections/google/start`,
+  calendarConnectUrl: () => `${API_BASE}/connections/google/calendar/start`,
+  githubConnectUrl: () => `${API_BASE}/connections/github/start`,
+  calendarStatus: () => request<ServiceStatus>("/calendar/status"),
+  githubStatus: () => request<ServiceStatus>("/github/status"),
+  disconnectCalendar: () =>
+    request<{ disconnected: boolean; provider: string }>("/connections/google/calendar/disconnect", {
+      method: "POST",
+    }),
+  disconnectGithub: () =>
+    request<{ disconnected: boolean; provider: string }>("/connections/github/disconnect", {
+      method: "POST",
+    }),
+  listCalendarEvents: (limit = 20) => request<any>(`/calendar/events?limit=${limit}`),
+  calendarFreeBusy: (input: Record<string, unknown>) =>
+    request<any>("/calendar/freebusy", { method: "POST", body: JSON.stringify(input) }),
+  createCalendarEvent: (input: Record<string, unknown>) =>
+    request<any>("/calendar/events", { method: "POST", body: JSON.stringify(input) }),
+  githubProfile: () => request<any>("/github/profile"),
+  listGithubRepos: (limit = 30) => request<any>(`/github/repos?limit=${limit}`),
+  listGithubWorkflowRuns: (owner: string, repo: string, limit = 20) =>
+    request<any>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflow-runs?limit=${limit}`),
+  createGithubIssue: (owner: string, repo: string, input: { title: string; body?: string }) =>
+    request<any>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  createGithubBranch: (owner: string, repo: string, input: { new_branch: string; from_ref?: string }) =>
+    request<any>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   listNotifications: (category?: string) =>
     request<NotificationResponse>(
       `/notifications${category ? `?category=${encodeURIComponent(category)}` : ""}`,

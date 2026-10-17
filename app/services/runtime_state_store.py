@@ -25,3 +25,11 @@ class RuntimeStateStore:
         self.db.commit()
         self.db.refresh(row)
         return row
+
+    def delete(self, key: str) -> bool:
+        row = self.db.get(RuntimeState, key)
+        if row is None:
+            return False
+        self.db.delete(row)
+        self.db.commit()
+        return True

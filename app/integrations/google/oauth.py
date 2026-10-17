@@ -31,11 +31,22 @@ def build_google_oauth_flow(
     *,
     state: str | None = None,
     scopes: list[str] | None = None,
+    code_verifier: str | None = None,
+    autogenerate_code_verifier: bool = False,
 ) -> Flow:
+    """Build one leg of Google's web OAuth flow.
+
+    PKCE is generated explicitly on the authorization leg and the same verifier is
+    supplied again on the callback leg. Reconstructing a Flow without that verifier
+    after sending a code_challenge makes Google reject the token exchange with
+    ``invalid_grant: Missing code verifier``.
+    """
     flow = Flow.from_client_config(
         _client_config(settings),
         scopes=scopes or GOOGLE_GMAIL_SCOPES,
         state=state,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=autogenerate_code_verifier,
     )
     flow.redirect_uri = settings.google_oauth_redirect_uri
     return flow

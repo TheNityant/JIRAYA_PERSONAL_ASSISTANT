@@ -1,4 +1,5 @@
 import os
+import re
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -39,12 +40,46 @@ def _frontend_redirect(*, status: str, provider: str, detail: str | None = None)
     return RedirectResponse(f"{settings.frontend_base_url}/?{urlencode(query)}", status_code=302)
 
 
+def _oauth_state_key(user_id: str) -> str:
+    return f"oauth-google-health:{user_id}"
+
+
 def _safe_oauth_error(exc: Exception) -> str:
-    """Expose Jiraya-owned configuration errors without leaking provider payloads."""
-    if isinstance(exc, RuntimeError):
-        text = str(exc).strip()
-        return text[:300] if text else "RuntimeError"
-    return type(exc).__name__
+    """Return useful OAuth diagnostics while redacting credential-like values."""
+    kind = type(exc).__name__
+    text = str(exc).strip()
+    if not text:
+        return kind
+
+    # Provider/library errors are useful during local development, but never surface
+    # authorization codes, access/refresh tokens, or client secrets.
+    redacted = re.sub(
+        r"(?i)(client_secret|access_token|refresh_token|id_token|authorization_code|code)\s*[=:]\s*[^\s,&]+",
+        r"\1=[REDACTED]",
+        text,
+    )
+    redacted = redacted.replace("\n", " ").strip()
+    if len(redacted) > 320:
+        redacted = redacted[:317] + "..."
+    return f"{kind}: {redacted}"
+
+
+def _record_oauth_health(
+    db: Session,
+    *,
+    user_id: str,
+    status: str,
+    detail: str | None = None,
+    account: str | None = None,
+) -> None:
+    RuntimeStateStore(db).set(
+        _oauth_state_key(user_id),
+        {
+            "status": status,
+            "detail": detail,
+            "account": account,
+        },
+    )
 
 
 @router.get("")
@@ -59,19 +94,29 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
     )
     gmail_connected = bool(
         active_google
-        and any(scope in active_google.scopes for scope in GOOGLE_GMAIL_SCOPES)
+        and all(scope in (active_google.scopes or []) for scope in GOOGLE_GMAIL_SCOPES)
     )
+    oauth_health = RuntimeStateStore(db).get(_oauth_state_key(settings.dev_user_id)) or {}
+    oauth_error = (
+        str(oauth_health.get("detail") or "").strip()
+        if oauth_health.get("status") == "ERROR" and not gmail_connected
+        else ""
+    )
+    gmail_description = "Read incoming mail and send replies for allowed automations."
+    if oauth_error:
+        gmail_description = f"Connection failed: {oauth_error} Click Connect to retry."
 
     return {
         "mode": "single-user-development",
         "user": {"id": settings.dev_user_id, "email": settings.dev_user_email},
         "connections": [_public_connection(item) for item in connections],
+        "oauth_status": oauth_health,
         "catalog": [
             {
                 "id": "gmail",
                 "provider": "google",
                 "label": "Gmail",
-                "description": "Read incoming mail and send replies for allowed automations.",
+                "description": gmail_description,
                 "status": "CONNECTED" if gmail_connected else "AVAILABLE",
                 "account": active_google.provider_account_id if gmail_connected else None,
                 "connect_path": "/connections/google/start",
@@ -109,18 +154,33 @@ def start_google_connection(
     store.ensure_user(user_id=settings.dev_user_id, email=settings.dev_user_email)
 
     try:
+        # Fail locally before sending the user through Google when Jiraya cannot securely
+        # persist the resulting refresh token.
+        TokenCipher(settings.token_encryption_key)
         state_record = store.create_oauth_state(
             user_id=settings.dev_user_id,
             provider="google",
         )
+        _record_oauth_health(
+            db,
+            user_id=settings.dev_user_id,
+            status="AUTHORIZING",
+            detail=None,
+        )
         flow = build_google_oauth_flow(settings, state=state_record.state)
         authorization_url, _ = flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
             prompt="consent",
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        detail = _safe_oauth_error(exc)
+        _record_oauth_health(
+            db,
+            user_id=settings.dev_user_id,
+            status="ERROR",
+            detail=detail,
+        )
+        raise HTTPException(status_code=503, detail=detail) from exc
 
     return RedirectResponse(authorization_url, status_code=302)
 
@@ -137,11 +197,32 @@ def google_connection_callback(
 
     state_record = store.consume_oauth_state(state=state, provider="google")
     if state_record is None:
-        return _frontend_redirect(status="error", provider="google", detail="invalid_or_expired_state")
+        detail = "invalid_or_expired_state"
+        _record_oauth_health(
+            db,
+            user_id=settings.dev_user_id,
+            status="ERROR",
+            detail=detail,
+        )
+        return _frontend_redirect(status="error", provider="google", detail=detail)
     if error:
-        return _frontend_redirect(status="error", provider="google", detail=error)
+        detail = f"GoogleAuthorizationError: {str(error)[:240]}"
+        _record_oauth_health(
+            db,
+            user_id=state_record.user_id,
+            status="ERROR",
+            detail=detail,
+        )
+        return _frontend_redirect(status="error", provider="google", detail=detail)
     if not code:
-        return _frontend_redirect(status="error", provider="google", detail="missing_code")
+        detail = "missing_code"
+        _record_oauth_health(
+            db,
+            user_id=state_record.user_id,
+            status="ERROR",
+            detail=detail,
+        )
+        return _frontend_redirect(status="error", provider="google", detail=detail)
 
     try:
         if settings.app_env.lower() == "development":
@@ -195,11 +276,25 @@ def google_connection_callback(
                 "connection_id": connection.id,
             },
         )
+        _record_oauth_health(
+            db,
+            user_id=state_record.user_id,
+            status="CONNECTED",
+            detail=None,
+            account=email_address,
+        )
     except Exception as exc:
+        detail = _safe_oauth_error(exc)
+        _record_oauth_health(
+            db,
+            user_id=state_record.user_id,
+            status="ERROR",
+            detail=detail,
+        )
         return _frontend_redirect(
             status="error",
             provider="google",
-            detail=_safe_oauth_error(exc),
+            detail=detail,
         )
 
     return _frontend_redirect(status="connected", provider="google")
@@ -216,6 +311,12 @@ def disconnect_google(db: Session = Depends(get_db)) -> dict:
     connection = ConnectionStore(db).disconnect(
         user_id=settings.dev_user_id,
         provider="google",
+    )
+    _record_oauth_health(
+        db,
+        user_id=settings.dev_user_id,
+        status="DISCONNECTED",
+        detail=None,
     )
     return {
         "disconnected": connection is not None,

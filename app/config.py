@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
     google_oauth_redirect_uri: str = "http://127.0.0.1:8000/connections/google/callback"
+    google_calendar_oauth_redirect_uri: str = (
+        "http://127.0.0.1:8000/connections/google/calendar/callback"
+    )
+
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_redirect_uri: str = "http://127.0.0.1:8000/connections/github/callback"
+    github_oauth_scopes: str = "repo workflow read:user"
+    github_api_base_url: str = "https://api.github.com"
 
     gmail_credentials_path: str = "credentials.json"
     gmail_token_path: str = "token.json"

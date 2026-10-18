@@ -1,0 +1,397 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from googleapiclient.errors import HttpError
+from sqlalchemy.orm import Session
+
+from app.automation.reliable_executor import ReliableAutomationExecutor
+from app.config import Settings
+from app.integrations.gmail.connection import get_gmail_client
+from app.integrations.gmail.models import GmailMessage
+from app.providers.nebius import NebiusProvider
+from app.services.action_store import ActionStore
+from app.services.automation_store import AutomationStore
+from app.services.connection_store import ConnectionStore
+from app.services.notification_store import NotificationStore
+from app.services.obligation_store import ObligationStore
+from app.services.runtime_state_store import RuntimeStateStore
+from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
+
+
+BOOTSTRAP_LOOKBACK_MS = 2 * 60 * 1000
+OPEN_OBLIGATION_SWEEP_LIMIT = 20
+
+
+class GmailRuntimeService:
+    """Consume Gmail history and route events into execution/reconciliation."""
+
+    def __init__(self, *, db: Session, settings: Settings):
+        self.db = db
+        self.settings = settings
+        self.gmail = get_gmail_client(db, settings)
+        self.provider = NebiusProvider(settings)
+        self.state = RuntimeStateStore(db)
+        self.notifications = NotificationStore(db)
+        self.actions = ActionStore(db)
+        self.automations = AutomationStore(db)
+        self.obligations = ObligationStore(db)
+        self.executor = ReliableAutomationExecutor(
+            settings=settings,
+            db=db,
+            provider=self.provider,
+            gmail=self.gmail,
+        )
+
+    @property
+    def cursor_key(self) -> str:
+        return f"gmail-history:{self.settings.dev_user_id}"
+
+    def poll(self) -> dict:
+        watch_error: str | None = None
+        if self.settings.gmail_pubsub_topic_name and self.settings.gmail_watch_auto_register:
+            try:
+                self.ensure_watch()
+            except Exception as exc:
+                # Pub/Sub is an acceleration path. A bad topic/config must never disable
+                # the local history monitor that provides the same semantics.
+                watch_error = type(exc).__name__
+
+        profile = self.gmail.get_profile()
+        current_history_id = str(profile.get("historyId") or "")
+        email_address = str(profile.get("emailAddress") or "")
+        if not current_history_id:
+            return {"decision": "NO_HISTORY_ID", "processed": 0, "watch_error": watch_error}
+
+        state = self.state.get(self.cursor_key)
+        if not state or not state.get("history_id"):
+            # Seed the cursor first, then optionally process only a very recent inbox item.
+            # This closes the startup race where the user sends a test message during the
+            # first monitor cycle and it would otherwise become part of the baseline.
+            self.state.set(
+                self.cursor_key,
+                {
+                    **(state or {}),
+                    "history_id": current_history_id,
+                    "email_address": email_address,
+                },
+            )
+            bootstrap_result = self._bootstrap_recent_inbox()
+            sweep = self.reconcile_open_obligations()
+            return {
+                "decision": "CURSOR_INITIALIZED",
+                "processed": 1 if bootstrap_result else 0,
+                "history_id": current_history_id,
+                "bootstrap_result": bootstrap_result,
+                "reconciliation_sweep": sweep,
+                "watch_error": watch_error,
+            }
+
+        if str(state["history_id"]) == current_history_id:
+            # Gmail history can be quiet even though an existing OPEN obligation deserves
+            # re-evaluation under newer reconciliation semantics. Sweeping open obligations
+            # makes persisted work self-healing instead of requiring another email event.
+            sweep = self.reconcile_open_obligations()
+            return {
+                "decision": "NO_CHANGE",
+                "processed": 0,
+                "history_id": current_history_id,
+                "reconciliation_sweep": sweep,
+                "watch_error": watch_error,
+            }
+
+        result = self.consume_history(target_history_id=current_history_id, email_address=email_address)
+        if watch_error:
+            result["watch_error"] = watch_error
+        return result
+
+    def _bootstrap_recent_inbox(self) -> dict | None:
+        try:
+            message = self.gmail.get_latest_inbox()
+        except Exception:
+            return None
+        if message is None:
+            return None
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        if message.internal_date_ms <= 0 or now_ms - message.internal_date_ms > BOOTSTRAP_LOOKBACK_MS:
+            return None
+        return self.process_message(message)
+
+    def reconcile_open_obligations(self, *, limit: int = OPEN_OBLIGATION_SWEEP_LIMIT) -> list[dict]:
+        """Reconcile persisted OPEN obligations even when Gmail history is otherwise quiet.
+
+        This is intentionally bounded. The workflow itself checkpoints sent candidates, so
+        a candidate evaluated with the current resolver version is not repeatedly sent to
+        the model on every poll. Older resolver decisions may be reconsidered once.
+        """
+        results: list[dict] = []
+        seen_actions: set[str] = set()
+        for obligation in self.obligations.list_recent(status="OPEN", limit=limit):
+            action_id = obligation.related_action_id
+            if not action_id or action_id in seen_actions:
+                continue
+            seen_actions.add(action_id)
+            result = GmailReconciliationWorkflow(
+                db=self.db,
+                provider=self.provider,
+                gmail=self.gmail,
+            ).run(action_id=action_id)
+            self._notify_reconciliation(action_id=action_id, result=result)
+            results.append(
+                {
+                    "action_id": action_id,
+                    "obligation_id": obligation.id,
+                    "decision": result.get("decision"),
+                    "classification": result.get("classification"),
+                    "resolution_status": result.get("resolution_status"),
+                }
+            )
+        return results
+
+    def ensure_watch(self) -> dict | None:
+        """Renew the Gmail watch when it is absent or within 24 hours of expiry."""
+        if not self.settings.gmail_pubsub_topic_name:
+            return None
+        state = self.state.get(self.cursor_key) or {}
+        expiration_raw = state.get("watch_expiration")
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        try:
+            expiration_ms = int(expiration_raw or 0)
+        except (TypeError, ValueError):
+            expiration_ms = 0
+        if expiration_ms > now_ms + 24 * 60 * 60 * 1000:
+            return None
+
+        watch = self.gmail.register_watch(topic_name=self.settings.gmail_pubsub_topic_name)
+        profile = self.gmail.get_profile()
+        existing_cursor = str(state.get("history_id") or "")
+        watch_history = str(watch.get("historyId") or profile.get("historyId") or "")
+        next_state = {
+            **state,
+            "history_id": existing_cursor or watch_history,
+            "email_address": profile.get("emailAddress") or state.get("email_address") or "",
+            "watch_expiration": watch.get("expiration"),
+            "pubsub_topic": self.settings.gmail_pubsub_topic_name,
+        }
+        self.state.set(self.cursor_key, next_state)
+
+        connection = ConnectionStore(self.db).get_active(
+            user_id=self.settings.dev_user_id,
+            provider="google",
+        )
+        if connection:
+            ConnectionStore(self.db).update_metadata(
+                connection,
+                {
+                    "gmail_watch_expiration": watch.get("expiration"),
+                    "gmail_pubsub_topic": self.settings.gmail_pubsub_topic_name,
+                },
+            )
+        return watch
+
+    def consume_history(self, *, target_history_id: str | None = None, email_address: str | None = None) -> dict:
+        state = self.state.get(self.cursor_key)
+        if not state or not state.get("history_id"):
+            profile = self.gmail.get_profile()
+            history_id = str(profile.get("historyId") or target_history_id or "")
+            self.state.set(
+                self.cursor_key,
+                {
+                    **(state or {}),
+                    "history_id": history_id,
+                    "email_address": str(profile.get("emailAddress") or email_address or ""),
+                },
+            )
+            bootstrap_result = self._bootstrap_recent_inbox()
+            sweep = self.reconcile_open_obligations()
+            return {
+                "decision": "CURSOR_INITIALIZED",
+                "processed": 1 if bootstrap_result else 0,
+                "history_id": history_id,
+                "bootstrap_result": bootstrap_result,
+                "reconciliation_sweep": sweep,
+            }
+
+        start_history_id = str(state["history_id"])
+        try:
+            message_ids, newest_history_id = self.gmail.list_history_message_ids(
+                start_history_id=start_history_id
+            )
+        except HttpError as exc:
+            if getattr(exc.resp, "status", None) == 404:
+                profile = self.gmail.get_profile()
+                reset_id = str(profile.get("historyId") or target_history_id or start_history_id)
+                self.state.set(
+                    self.cursor_key,
+                    {
+                        **state,
+                        "history_id": reset_id,
+                        "email_address": str(profile.get("emailAddress") or email_address or ""),
+                        "resynced": True,
+                    },
+                )
+                self.notifications.create_once(
+                    user_id=self.settings.dev_user_id,
+                    category="INFORMATION",
+                    severity="INFO",
+                    title="Gmail monitor resynced",
+                    message="The Gmail history cursor expired, so Jiraya resumed from the current mailbox state.",
+                    source="gmail",
+                    dedupe_key=f"gmail-resync:{reset_id}",
+                )
+                return {"decision": "CURSOR_RESYNCED", "processed": 0, "history_id": reset_id}
+            raise
+
+        messages: list[GmailMessage] = []
+        for message_id in message_ids:
+            try:
+                messages.append(self.gmail.get_message(message_id))
+            except Exception:
+                continue
+        messages.sort(key=lambda item: item.internal_date_ms)
+
+        results = [self.process_message(message) for message in messages]
+        candidates = [value for value in (newest_history_id, target_history_id) if value]
+        try:
+            final_history_id = str(max(int(value) for value in candidates)) if candidates else start_history_id
+        except ValueError:
+            final_history_id = str(newest_history_id or target_history_id or start_history_id)
+        self.state.set(
+            self.cursor_key,
+            {
+                **state,
+                "history_id": final_history_id,
+                "email_address": email_address or state.get("email_address") or "",
+            },
+        )
+        return {
+            "decision": "PROCESSED",
+            "processed": len(messages),
+            "history_id": final_history_id,
+            "results": results,
+        }
+
+    def process_message(self, message: GmailMessage) -> dict:
+        action = self.actions.latest_verified_for_thread(message.thread_id)
+        if action is not None and message.id != (action.context or {}).get("source_message_id"):
+            workflow = GmailReconciliationWorkflow(
+                db=self.db,
+                provider=self.provider,
+                gmail=self.gmail,
+            )
+            reconciliation = workflow.run(action_id=action.id)
+            self._notify_reconciliation(action_id=action.id, result=reconciliation)
+
+            # If this incoming history event arrived after a user/agent SENT message that
+            # resolves an obligation, the first workflow pass may intentionally resolve the
+            # sent candidate first. Run once more so the current incoming acknowledgement
+            # or new request is not lost merely because resolution had priority.
+            follow_up_reconciliation = None
+            if "SENT" not in message.labels and reconciliation.get("decision") == "OBLIGATION_RESOLVED":
+                follow_up_reconciliation = workflow.run(action_id=action.id)
+                self._notify_reconciliation(action_id=action.id, result=follow_up_reconciliation)
+
+            # A tracked reply thread still feeds independent actions such as Calendar.
+            # Keep the existing reply reconciliator in charge of email responses.
+            independent_results = []
+            if "SENT" not in message.labels:
+                for automation in self.automations.list(source="gmail", enabled=True):
+                    action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
+                    if action_type in {"CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
+                        independent_results.append({"automation_id": automation.id,
+                            "result": self.executor.run(automation=automation, message_id=message.id)})
+            return {
+                "message_id": message.id,
+                "thread_id": message.thread_id,
+                "path": "RECONCILIATION",
+                "calendar_results": independent_results,
+                "result": reconciliation,
+                "follow_up_result": follow_up_reconciliation,
+            }
+
+        if "SENT" in message.labels:
+            return {
+                "message_id": message.id,
+                "thread_id": message.thread_id,
+                "path": "IGNORED_SENT",
+            }
+
+        results: list[dict] = []
+        reply_claimed = False
+        for automation in self.automations.list(source="gmail", enabled=True):
+            action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
+            if action_type == "DRAFT_REPLY" and reply_claimed:
+                continue
+
+            result = self.executor.run(automation=automation, message_id=message.id)
+            results.append({"automation_id": automation.id, "result": result})
+            if action_type == "DRAFT_REPLY" and result.get("decision") not in {
+                "NO_MATCH",
+                "AUTOMATION_DISABLED",
+                "UNSUPPORTED_TRIGGER",
+            }:
+                # At most one reply-producing automation can own one incoming message.
+                reply_claimed = True
+
+        return {
+            "message_id": message.id,
+            "thread_id": message.thread_id,
+            "path": "AUTOMATIONS",
+            "results": results,
+        }
+
+    def _notify_reconciliation(self, *, action_id: str, result: dict) -> None:
+        decision = result.get("decision")
+        obligation = result.get("obligation") or {}
+        if decision == "OBLIGATION_RESOLVED":
+            obligation_id = obligation.get("id")
+            if obligation_id:
+                self.notifications.mark_obligation_notifications_read(
+                    user_id=self.settings.dev_user_id,
+                    obligation_id=obligation_id,
+                )
+            self.notifications.create_once(
+                user_id=self.settings.dev_user_id,
+                category="STATE_CHANGED",
+                severity="SUCCESS",
+                title=f"Resolved: {obligation.get('title') or 'Obligation'}",
+                message=result.get("reason") or "Jiraya observed evidence that the obligation was completed.",
+                source="reconciliator",
+                action_id=action_id,
+                obligation_id=obligation_id,
+                dedupe_key=f"obligation-resolved:{obligation_id}:{result.get('resolution_status')}",
+                metadata={"result": decision, "resolution_status": result.get("resolution_status")},
+            )
+            return
+
+        if decision == "RECONCILED" and result.get("requires_follow_up"):
+            classification = result.get("classification") or "NEW_OBLIGATION"
+            self.notifications.create_once(
+                user_id=self.settings.dev_user_id,
+                category="ACTION_REQUIRED",
+                severity="WARNING",
+                title=obligation.get("title") or "New follow-up required",
+                message=result.get("reason") or "A later message changed what needs to happen next.",
+                source="reconciliator",
+                action_id=action_id,
+                obligation_id=obligation.get("id"),
+                dedupe_key=f"reconcile:{action_id}:{(result.get('later_message') or {}).get('message_id')}:{classification}",
+                metadata={"classification": classification},
+            )
+            return
+
+        if decision == "RECONCILED" and result.get("classification") == "NO_MATERIAL_CHANGE":
+            later = result.get("later_message") or {}
+            message_id = later.get("message_id")
+            self.notifications.create_once(
+                user_id=self.settings.dev_user_id,
+                category="INFORMATION",
+                severity="INFO",
+                title="Thread updated — no action required",
+                message=result.get("reason") or "Jiraya observed the reply and found no new work for you.",
+                source="reconciliator",
+                action_id=action_id,
+                obligation_id=obligation.get("id"),
+                dedupe_key=f"reconcile-no-action:{action_id}:{message_id}",
+                metadata={"classification": "NO_MATERIAL_CHANGE", "message_id": message_id},
+            )

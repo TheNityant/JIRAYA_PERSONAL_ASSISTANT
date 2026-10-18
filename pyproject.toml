@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jiraya-personal-assistant"
-version = "0.2.0"
+version = "0.5.0"
 description = "Evidence-aware Personal AI for the Nebius x NVIDIA Global AI Hackathon"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,6 +17,8 @@ dependencies = [
     "pydantic-settings>=2.10.0,<3.0.0",
     "sqlalchemy>=2.0.40,<3.0.0",
     "psycopg[binary]>=3.2.0,<4.0.0",
+    "cryptography>=46.0.0,<47.0.0",
+    "httpx>=0.28.0,<1.0.0",
     "google-api-python-client>=2.150.0,<3.0.0",
     "google-auth>=2.35.0,<3.0.0",
     "google-auth-oauthlib>=1.2.0,<2.0.0",
@@ -26,7 +28,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.4.0,<9.0.0",
-    "httpx>=0.28.0,<1.0.0",
     "ruff>=0.13.0,<1.0.0",
 ]
 

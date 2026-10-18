@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
 from typing import Any
 
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from app.config import Settings
@@ -13,13 +14,67 @@ from app.integrations.gmail.models import GmailMessage
 
 
 class GmailClient:
-    def __init__(self, settings: Settings, *, interactive_auth: bool = False):
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        interactive_auth: bool = False,
+        credentials: Credentials | None = None,
+    ):
         self.settings = settings
-        credentials = load_credentials(settings, interactive=interactive_auth)
-        self.service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
+        resolved_credentials = credentials or load_credentials(settings, interactive=interactive_auth)
+        self.service = build("gmail", "v1", credentials=resolved_credentials, cache_discovery=False)
 
     def get_profile(self) -> dict[str, Any]:
         return self.service.users().getProfile(userId="me").execute()
+
+    def register_watch(self, *, topic_name: str) -> dict[str, Any]:
+        if not topic_name:
+            raise ValueError("A Pub/Sub topic name is required to register a Gmail watch.")
+        # Deliberately watch the whole mailbox rather than only INBOX so Jiraya also
+        # observes the user's own SENT replies and can resolve obligations automatically.
+        return (
+            self.service.users()
+            .watch(userId="me", body={"topicName": topic_name})
+            .execute()
+        )
+
+    def stop_watch(self) -> None:
+        self.service.users().stop(userId="me").execute()
+
+    def list_history_message_ids(self, *, start_history_id: str) -> tuple[list[str], str]:
+        """Return message IDs added since a Gmail history cursor and the newest cursor."""
+        page_token: str | None = None
+        message_ids: list[str] = []
+        seen: set[str] = set()
+        newest_history_id = str(start_history_id)
+
+        while True:
+            response = (
+                self.service.users()
+                .history()
+                .list(
+                    userId="me",
+                    startHistoryId=str(start_history_id),
+                    historyTypes=["messageAdded"],
+                    pageToken=page_token,
+                    maxResults=500,
+                )
+                .execute()
+            )
+            newest_history_id = str(response.get("historyId") or newest_history_id)
+            for history in response.get("history", []) or []:
+                newest_history_id = str(history.get("id") or newest_history_id)
+                for added in history.get("messagesAdded", []) or []:
+                    message_id = str((added.get("message") or {}).get("id") or "")
+                    if message_id and message_id not in seen:
+                        seen.add(message_id)
+                        message_ids.append(message_id)
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+        return message_ids, newest_history_id
 
     def list_message_ids(self, *, query: str, max_results: int = 10) -> list[str]:
         response = (
@@ -30,12 +85,35 @@ class GmailClient:
         )
         return [item["id"] for item in response.get("messages", [])]
 
-    def get_latest_unread_inbox(self) -> GmailMessage | None:
-        ids = self.list_message_ids(query="is:unread in:inbox", max_results=10)
+    def _latest_for_query(self, query: str) -> GmailMessage | None:
+        ids = self.list_message_ids(query=query, max_results=10)
         if not ids:
             return None
         messages = [self.get_message(message_id) for message_id in ids]
         return max(messages, key=lambda item: item.internal_date_ms)
+
+    def get_latest_inbox(self) -> GmailMessage | None:
+        """Newest incoming inbox message regardless of read state."""
+        return self._latest_for_query("in:inbox")
+
+    def get_latest_unread_inbox(self) -> GmailMessage | None:
+        """Compatibility helper used by older/manual flows.
+
+        Manual debug controls should continue targeting the newest inbox message even if
+        the user opened it in Gmail between receiving it and pressing Debug. The automatic
+        runtime consumes exact history message IDs and does not depend on this helper.
+        """
+        return self.get_latest_inbox()
+
+    def get_thread_messages(self, thread_id: str) -> list[GmailMessage]:
+        raw_thread = (
+            self.service.users()
+            .threads()
+            .get(userId="me", id=thread_id, format="full")
+            .execute()
+        )
+        messages = [self._parse_message(raw) for raw in raw_thread.get("messages", [])]
+        return sorted(messages, key=lambda item: item.internal_date_ms)
 
     def get_message(self, message_id: str) -> GmailMessage:
         raw = (
@@ -44,6 +122,9 @@ class GmailClient:
             .get(userId="me", id=message_id, format="full")
             .execute()
         )
+        return self._parse_message(raw)
+
+    def _parse_message(self, raw: dict[str, Any]) -> GmailMessage:
         payload = raw.get("payload", {})
         headers = {
             header.get("name", "").lower(): header.get("value", "")

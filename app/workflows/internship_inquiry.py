@@ -7,6 +7,7 @@ from app.agent.email_agent import EmailAgent
 from app.config import Settings
 from app.integrations.gmail.client import GmailClient
 from app.providers.base import ModelProvider
+from app.services.action_store import ActionStore
 from app.services.event_ledger import EventLedger
 from app.verifier.gmail_verifier import GmailVerifier
 
@@ -22,6 +23,7 @@ class InternshipInquiryWorkflow:
     ):
         self.settings = settings
         self.ledger = EventLedger(db)
+        self.actions = ActionStore(db)
         self.gmail = gmail
         self.agent = EmailAgent(provider)
         self.verifier = GmailVerifier(gmail)
@@ -138,7 +140,7 @@ class InternshipInquiryWorkflow:
             }
 
         sent_message_id = sent["id"]
-        self.ledger.append(
+        sent_event = self.ledger.append(
             source="gmail",
             event_type="EMAIL_REPLY_SENT",
             entity_id=entity_id,
@@ -156,7 +158,7 @@ class InternshipInquiryWorkflow:
             "EXECUTION_FAILED": "EMAIL_REPLY_VERIFICATION_FAILED",
             "UNOBSERVED": "EMAIL_REPLY_UNOBSERVED",
         }[verification.status]
-        self.ledger.append(
+        verified_event = self.ledger.append(
             source="verifier",
             event_type=verification_event,
             entity_id=entity_id,
@@ -164,8 +166,22 @@ class InternshipInquiryWorkflow:
             payload=verification.evidence,
         )
 
+        action = self.actions.create_email_action(
+            correlation_id=correlation_id,
+            source_entity_id=entity_id,
+            source_message_id=message.id,
+            sent_message_id=sent_message_id,
+            thread_id=sent.get("threadId") or message.thread_id,
+            recipient=recipient,
+            status=verification.status,
+            executed_at=sent_event.occurred_at,
+            verified_at=verified_event.occurred_at if verification.status == "VERIFIED_SUCCESS" else None,
+            verification_evidence=verification.evidence,
+        )
+
         return {
             "correlation_id": correlation_id,
+            "action_id": action.id,
             "message_id": message.id,
             "sent_message_id": sent_message_id,
             "classification": classification.model_dump(),

@@ -10,6 +10,17 @@ Agent -> Verifier -> Event Ledger -> Reconciliator
 
 The distinguishing mechanism is temporal outcome assurance: Jiraya records evidence that an action really succeeded, then later uses event history to distinguish an original execution failure from an outcome that was legitimately superseded or externally invalidated afterward.
 
+## Frontend account and connection flow (Phase 2e)
+
+Open the web app, create a Jiraya account or sign in, then choose **Connect Gmail**,
+**Connect Calendar**, or **Connect GitHub**. The provider opens its authorization screen
+and returns to your own workspace. End users do not edit environment files or supply
+OAuth application credentials. The app owner configures the provider applications once.
+
+See [service integrations and deployment](docs/SERVICE_INTEGRATIONS.md#frontend-sign-in-and-connections)
+for account sessions, connection setup, production URLs and existing-workspace handling.
+The sections below retain the original Phase 1 standalone CLI workflow for reference.
+
 ## Current implementation: Phase 1 Gmail vertical slice
 
 ```text

@@ -27,6 +27,9 @@ class NotificationStore:
         metadata: dict | None = None,
     ) -> Notification:
         if dedupe_key:
+            # Account namespace also prevents cross-account source ID collisions.
+            import hashlib
+            dedupe_key = "user:" + user_id + ":" + hashlib.sha256(dedupe_key.encode()).hexdigest()
             existing = self.db.scalars(
                 select(Notification).where(Notification.dedupe_key == dedupe_key).limit(1)
             ).first()

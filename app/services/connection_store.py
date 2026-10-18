@@ -153,6 +153,10 @@ class ConnectionStore:
         if record is None or record.provider != provider:
             return None
 
+        from app.security.identity import identity
+        principal = identity.get()
+        if principal and record.user_id != principal[0]:
+            return None
         expires_at = record.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)

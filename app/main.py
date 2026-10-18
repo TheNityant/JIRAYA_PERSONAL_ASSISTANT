@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.db import init_db
 from app.routes import (
     ai,
+    auth,
     automation_execution,
     automations,
     calendar,
@@ -47,6 +48,8 @@ async def lifespan(_: FastAPI):
                     await task
 
 
+from app.security.sessions import AccountMiddleware
+
 app = FastAPI(
     title=settings.app_name,
     version="0.5.0",
@@ -56,6 +59,7 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+app.add_middleware(AccountMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[item.strip() for item in settings.frontend_origins.split(",") if item.strip()],
@@ -64,6 +68,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(ai.router)
 app.include_router(events.router)
 app.include_router(gmail.router)

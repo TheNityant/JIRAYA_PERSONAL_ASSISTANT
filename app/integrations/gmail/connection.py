@@ -23,7 +23,7 @@ def get_gmail_client(db: Session, settings: Settings) -> GmailClient:
         web_oauth_configured = bool(
             settings.google_oauth_client_id and settings.google_oauth_client_secret
         )
-        if web_oauth_configured:
+        if web_oauth_configured or settings.auth_required:
             raise RuntimeError("Gmail is not connected. Use Connect Gmail in the Jiraya frontend.")
         return GmailClient(settings)
 

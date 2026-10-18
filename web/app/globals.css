@@ -170,3 +170,15 @@ button { cursor: pointer; }
   .workspace.wide-view { grid-template-columns: 230px minmax(0, 1fr); }
   .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); max-height: none; }
 }
+
+.account-shell { min-height: calc(100vh - 40px); display: grid; place-items: center; padding: 28px; }
+.account-card { width: min(460px, 100%); padding: 32px; border: 1px solid var(--border); border-radius: 18px; background: var(--panel, #14181e); }
+.account-card h1 { margin: 12px 0; font-size: 30px; }
+.account-card p { color: var(--muted); line-height: 1.6; }
+.account-card form { display: grid; gap: 18px; margin: 24px 0 14px; }
+.account-card input { width: 100%; box-sizing: border-box; }
+.account-card .primary-button { margin-top: 12px; }
+.account-error { color: #f0a1a1 !important; padding: 8px 16px; }
+.account-bar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 24px; background: #11151a; border-bottom: 1px solid var(--border); }
+.setup-card { width: min(640px, 100%); }
+.setup-card .connection-card { margin-top: 14px; }

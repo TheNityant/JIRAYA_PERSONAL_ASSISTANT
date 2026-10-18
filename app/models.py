@@ -6,9 +6,14 @@ from sqlalchemy import Boolean, DateTime, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+from app.security.identity import current_user_id
 
 
-class Event(Base):
+class Owned:
+    user_id: Mapped[str] = mapped_column(String(64), index=True, default=current_user_id)
+
+
+class Event(Owned, Base):
     __tablename__ = "events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -25,7 +30,7 @@ class Event(Base):
     )
 
 
-class Action(Base):
+class Action(Owned, Base):
     __tablename__ = "actions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -41,13 +46,15 @@ class Action(Base):
     last_reconciliation: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reconciled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 
-class Obligation(Base):
+class Obligation(Owned, Base):
     """A first-class piece of work that remains outstanding after an observed event."""
 
     __tablename__ = "obligations"
@@ -73,7 +80,7 @@ class Obligation(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class Automation(Base):
+class Automation(Owned, Base):
     """User-owned workflow definition executed by Jiraya's generic automation runtime."""
 
     __tablename__ = "automations"
@@ -97,7 +104,7 @@ class Automation(Base):
     )
 
 
-class AutomationExecution(Base):
+class AutomationExecution(Owned, Base):
     """Persisted run state for a user-defined automation."""
 
     __tablename__ = "automation_executions"
@@ -140,9 +147,13 @@ class Notification(Base):
     automation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     action_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     obligation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    dedupe_key: Mapped[str | None] = mapped_column(String(500), nullable=True, unique=True, index=True)
+    dedupe_key: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, unique=True, index=True
+    )
     notification_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
@@ -167,6 +178,7 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     display_name: Mapped[str] = mapped_column(String(255), default="Local user")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -178,7 +190,9 @@ class Connection(Base):
 
     __tablename__ = "connections"
     __table_args__ = (
-        UniqueConstraint("user_id", "provider", "provider_account_id", name="uq_user_provider_account"),
+        UniqueConstraint(
+            "user_id", "provider", "provider_account_id", name="uq_user_provider_account"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -190,7 +204,9 @@ class Connection(Base):
     scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
     credential_ciphertext: Mapped[str] = mapped_column(Text)
     connection_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
@@ -211,3 +227,13 @@ class OAuthState(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

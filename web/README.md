@@ -19,7 +19,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://127.0.0.1:3000`. Create an account/sign in, then connect services through the first-run connection screen.
 
 The UI stores automation definitions through the FastAPI `/automations` API. The current vertical slice supports Gmail as the first source, deterministic sender/subject/body filters, a Nemotron semantic condition, user context, action configuration, approval policy, and a live match preview against the latest unread Gmail message.
 

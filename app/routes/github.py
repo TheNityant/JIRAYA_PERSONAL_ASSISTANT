@@ -40,7 +40,7 @@ def _record_health(db: Session, *, user_id: str, status: str, detail: str | None
 
 
 @router.get("/connections/github/start")
-def start_github_connection(db: Session = Depends(get_db)):
+def start_github_connection(response_mode: str | None = Query(default=None), db: Session = Depends(get_db)):
     settings = get_settings()
     store = ConnectionStore(db)
     store.ensure_user(user_id=settings.dev_user_id, email=settings.dev_user_email)
@@ -52,11 +52,13 @@ def start_github_connection(db: Session = Depends(get_db)):
         )
         authorization_url = build_github_authorization_url(settings, state=state_record.state)
         _record_health(db, user_id=settings.dev_user_id, status="AUTHORIZING")
+        if response_mode == "json":
+            return {"authorization_url": authorization_url}
         return RedirectResponse(authorization_url, status_code=302)
     except Exception as exc:
         detail = f"{type(exc).__name__}: {str(exc)[:220]}"
         _record_health(db, user_id=settings.dev_user_id, status="ERROR", detail=detail)
-        raise HTTPException(status_code=503, detail=detail) from exc
+        raise HTTPException(status_code=503, detail="GitHub connection is unavailable. Please contact the app owner." if response_mode == "json" else detail) from exc
 
 
 @router.get("/connections/github/callback")

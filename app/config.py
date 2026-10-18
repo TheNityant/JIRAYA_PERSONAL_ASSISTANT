@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,18 @@ class Settings(BaseSettings):
 
     dev_user_id: str = "local-dev-user"
     dev_user_email: str = "local@jiraya.dev"
+
+    auth_required: bool = True
+    session_days: int = Field(default=7, ge=1, le=30)
+    session_cookie_secure: bool = False
+    session_cookie_samesite: Literal["lax", "none"] = "lax"
+    registration_enabled: bool = True
+
+    @model_validator(mode="after")
+    def production_authentication(self):
+        if self.app_env.lower() == "production" and not self.auth_required:
+            raise ValueError("Authentication must remain enabled in production")
+        return self
 
     token_encryption_key: str = ""
 
@@ -65,5 +78,21 @@ class Settings(BaseSettings):
 
 
 @lru_cache
-def get_settings() -> Settings:
+def get_base_settings() -> Settings:
     return Settings()
+
+
+def get_settings() -> Settings:
+    from app.security.identity import identity
+
+    base = get_base_settings()
+    current = identity.get()
+    return (
+        base.model_copy(update={"dev_user_id": current[0], "dev_user_email": current[1]})
+        if current
+        else base
+    )
+
+
+# Preserve the cache-reset hook used by local tooling/tests.
+get_settings.cache_clear = get_base_settings.cache_clear

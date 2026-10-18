@@ -182,5 +182,5 @@ def test_editing_automation_supersedes_old_waiting_approval_execution():
             automation_id=automation.id,
             source_event_id="message-1",
         ) is None
-        notification = db.query(Notification).filter(Notification.dedupe_key == "old-approval").one()
+        notification = db.query(Notification).filter(Notification.automation_id == automation.id).one()
         assert notification.read_at is not None

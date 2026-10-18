@@ -1,5 +1,6 @@
 import base64
 import json
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -103,7 +104,9 @@ async def gmail_pubsub_webhook(
     db: Session = Depends(get_db),
 ) -> dict:
     settings = get_settings()
-    if settings.gmail_pubsub_webhook_token and token != settings.gmail_pubsub_webhook_token:
+    if settings.auth_required and not settings.gmail_pubsub_webhook_token:
+        raise HTTPException(status_code=503, detail="Gmail webhook authentication is not configured")
+    if settings.gmail_pubsub_webhook_token and not secrets.compare_digest(token or "", settings.gmail_pubsub_webhook_token):
         raise HTTPException(status_code=401, detail="Invalid Gmail Pub/Sub webhook token")
 
     payload = await request.json()
@@ -121,6 +124,21 @@ async def gmail_pubsub_webhook(
     if not history_id:
         raise HTTPException(status_code=400, detail="Gmail notification has no historyId")
 
+    if settings.auth_required:
+        from sqlalchemy import select
+        from app.models import Connection, User
+        from app.db import SessionLocal
+        from app.security.identity import account_scope
+        owners = db.execute(select(User.id, User.email).join(Connection, Connection.user_id == User.id)
+            .where(Connection.provider == "google", Connection.status == "CONNECTED",
+                   Connection.provider_account_id == email_address)).all()
+        results = []
+        for user_id, email in owners:
+            with account_scope(user_id, email), SessionLocal() as scoped_db:
+                scoped_settings = settings.model_copy(update={"dev_user_id": user_id, "dev_user_email": email})
+                results.append(GmailRuntimeService(db=scoped_db, settings=scoped_settings).consume_history(
+                    target_history_id=history_id, email_address=email_address))
+        return {"accepted": True, "results": results}
     service = GmailRuntimeService(db=db, settings=settings)
     profile = service.gmail.get_profile()
     profile_email = str(profile.get("emailAddress") or "")

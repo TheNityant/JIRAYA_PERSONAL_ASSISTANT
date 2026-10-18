@@ -122,7 +122,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
         gmail_description = f"Connection failed: {oauth_error} Click Connect to retry."
 
     return {
-        "mode": "single-user-development",
+        "mode": "authenticated" if settings.auth_required else "single-user-development",
         "user": {"id": settings.dev_user_id, "email": settings.dev_user_email},
         "connections": [_public_connection(item) for item in connections],
         "oauth_status": oauth_health,
@@ -132,7 +132,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
                 "provider": "google",
                 "label": "Gmail",
                 "description": gmail_description,
-                "status": "CONNECTED" if gmail_connected else "AVAILABLE",
+                "status": "CONNECTED" if gmail_connected else "AVAILABLE" if settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key else "SETUP_REQUIRED",
                 "account": active_google.provider_account_id if gmail_connected else None,
                 "connect_path": "/connections/google/start",
             },
@@ -143,7 +143,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
                 "description": (f"Connection failed: {calendar_health.get('detail')}"
                     if calendar_health.get("status") == "ERROR" and not calendar_connected
                     else "Create events from email and watch calendar changes."),
-                "status": "CONNECTED" if calendar_connected else "AVAILABLE",
+                "status": "CONNECTED" if calendar_connected else "AVAILABLE" if settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key else "SETUP_REQUIRED",
                 "account": active_calendar.provider_account_id if calendar_connected else None,
                 "connect_path": "/connections/google/calendar/start",
             },
@@ -154,7 +154,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
                 "description": (f"Connection failed: {github_health.get('detail')}"
                     if github_health.get("status") == "ERROR" and not active_github
                     else "Watch repositories, create issues and branches, and run workflows."),
-                "status": "CONNECTED" if active_github else "AVAILABLE",
+                "status": "CONNECTED" if active_github else "AVAILABLE" if settings.github_oauth_client_id and settings.github_oauth_client_secret and settings.token_encryption_key else "SETUP_REQUIRED",
                 "account": active_github.provider_account_id if active_github else None,
                 "connect_path": "/connections/github/start",
             },
@@ -165,6 +165,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
 @router.get("/google/start")
 def start_google_connection(
     return_to: str | None = Query(default=None),
+    response_mode: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     del return_to
@@ -214,8 +215,10 @@ def start_google_connection(
             status="ERROR",
             detail=detail,
         )
-        raise HTTPException(status_code=503, detail=detail) from exc
+        raise HTTPException(status_code=503, detail="Gmail connection is unavailable. Please contact the app owner." if response_mode == "json" else detail) from exc
 
+    if response_mode == "json":
+        return {"authorization_url": authorization_url}
     return RedirectResponse(authorization_url, status_code=302)
 
 
@@ -235,7 +238,8 @@ def google_connection_callback(
 
     state_record = store.consume_oauth_state(state=state, provider="google")
     if state_record is None:
-        runtime_state.delete(pkce_key)
+        # Never delete a verifier owned by a different account.
+        pass
         detail = "invalid_or_expired_state"
         _record_oauth_health(
             db,

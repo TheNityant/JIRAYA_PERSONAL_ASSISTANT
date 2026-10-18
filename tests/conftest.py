@@ -8,3 +8,5 @@ os.environ["GMAIL_BACKGROUND_MONITOR_ENABLED"] = "false"
 os.environ["CALENDAR_BACKGROUND_MONITOR_ENABLED"] = "false"
 
 os.environ["GITHUB_BACKGROUND_MONITOR_ENABLED"] = "false"
+
+os.environ["AUTH_REQUIRED"] = "false"

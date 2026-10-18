@@ -1,5 +1,5 @@
-import AutomationBuilder from "@/components/AutomationBuilder";
+import AccountGate from "@/components/AccountGate";
 
 export default function Home() {
-  return <AutomationBuilder />;
+  return <AccountGate />;
 }

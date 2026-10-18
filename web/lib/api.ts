@@ -161,6 +161,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
+    credentials: "include",
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -168,14 +169,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Request failed with ${response.status}`);
+    if (response.status === 401 && !path.startsWith("/auth/") && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("jiraya-session-expired"));
+    }
+    let message = `Request failed with ${response.status}`;
+    try { const body = await response.json(); message = typeof body.detail === "string" ? body.detail : "Please check the entered details."; } catch {}
+    throw new Error(message);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
+export type Account = {id: string; email: string; display_name: string};
+export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
+
 export const api = {
+  account: () => request<AccountState>("/auth/me"),
+  login: (email: string, password: string) => request<{user: Account}>("/auth/login", {method: "POST", body: JSON.stringify({email, password})}),
+  register: (display_name: string, email: string, password: string) => request<{user: Account}>("/auth/register", {method: "POST", body: JSON.stringify({display_name, email, password})}),
+  logout: () => request<{signed_out: boolean}>("/auth/logout", {method: "POST"}),
+  startConnection: (provider: "gmail" | "google_calendar" | "github") => {
+    const paths = {gmail: "/connections/google/start", google_calendar: "/connections/google/calendar/start", github: "/connections/github/start"};
+    return request<{authorization_url: string}>(`${paths[provider]}?response_mode=json`);
+  },
   listAutomations: () => request<Automation[]>("/automations"),
   createAutomation: (input: AutomationInput) =>
     request<Automation>("/automations", { method: "POST", body: JSON.stringify(input) }),

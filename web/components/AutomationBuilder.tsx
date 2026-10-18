@@ -192,19 +192,17 @@ export default function AutomationBuilder() {
   }
 
   useEffect(() => {
-    Promise.all([refresh(), refreshConnections(), refreshOperations()]).catch((error) =>
-      setStatus(`Backend unavailable: ${error.message}`),
-    );
-
+    const loaded = Promise.all([refresh(), refreshConnections(), refreshOperations()]);
+    loaded.catch((error) => setStatus(`Backend unavailable: ${error.message}`));
     const query = new URLSearchParams(window.location.search);
     const connectionStatus = query.get("status");
     const provider = query.get("connection");
     if (provider && connectionStatus) {
-      setStatus(
+      loaded.then(() => setStatus(
         connectionStatus === "connected"
           ? `${provider} connected successfully`
           : `${provider} connection failed: ${query.get("detail") ?? "unknown error"}`,
-      );
+      )).catch(() => undefined);
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -411,9 +409,12 @@ export default function AutomationBuilder() {
     await refresh();
   }
 
-  function connect(item: ConnectionCatalogItem) {
-    const urls: Record<string, string> = {gmail: api.googleConnectUrl(), google_calendar: api.calendarConnectUrl(), github: api.githubConnectUrl()};
-    if (urls[item.id]) window.location.href = urls[item.id];
+  async function connect(item: ConnectionCatalogItem) {
+    setStatus(`Opening ${item.label} authorization...`);
+    try {
+      const result = await api.startConnection(item.id as "gmail" | "google_calendar" | "github");
+      window.location.assign(result.authorization_url);
+    } catch (error: any) { setStatus(`Connection unavailable: ${error.message}`); }
   }
 
   async function disconnect(item: ConnectionCatalogItem) {
@@ -522,7 +523,7 @@ export default function AutomationBuilder() {
                 <button className="connection-action connected" onClick={() => disconnect(item)} title={`Disconnect ${item.label}`}>Connected</button>
               ) : item.status === "AVAILABLE" ? (
                 <button className="connection-action" onClick={() => connect(item)}>Connect</button>
-              ) : <span className="connection-coming">Soon</span>}
+              ) : <span className="connection-coming" title="The app owner needs to enable this connection.">Unavailable</span>}
             </div>
           ))}
         </div>
@@ -675,7 +676,7 @@ export default function AutomationBuilder() {
             <>
               <header className="operations-header"><div><span className="eyebrow">Google Calendar</span><h1>Your calendar, connected</h1><p>{calendar?.connected ? calendar.account : "Connect Calendar to create events from email and watch changes."}</p></div><button onClick={refreshCalendar}>Refresh</button></header>
               {calendarError && <p role="alert">{calendarError}</p>}
-              {!calendar?.connected && <button className="primary-button" onClick={() => {window.location.href = api.calendarConnectUrl();}}>Connect Calendar</button>}
+              {!calendar?.connected && <button className="primary-button" onClick={() => connect({id: "google_calendar", label: "Google Calendar"} as ConnectionCatalogItem)}>Connect Calendar</button>}
               {calendar?.connected && <p>{calendar.background_monitor_configured ? `Change monitoring · ${calendar.poll_seconds}s` : "Background monitoring disabled"} · {calendar.monitor?.last_decision ? nice(calendar.monitor.last_decision) : "Waiting for first cycle"}{calendar.monitor?.last_error ? ` · ${calendar.monitor.last_error}` : ""}</p>}
               <div className="operations-list">
                 {calendarEvents.map((event) => <article className="obligation-card" key={event.id}><strong>{event.summary ?? "Untitled event"}</strong><p>{event.start?.dateTime ? when(event.start.dateTime) : event.start?.date} — {event.end?.dateTime ? when(event.end.dateTime) : event.end?.date}</p>{event.htmlLink && <a href={event.htmlLink} target="_blank" rel="noreferrer">Open in Google Calendar</a>}</article>)}

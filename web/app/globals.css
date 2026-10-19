@@ -375,3 +375,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 .connection-card { flex-wrap: wrap; }
 .connection-copy { flex: 1 1 95px; }
 .connection-action { margin-left: auto; }
+
+.sync-notice { flex: none; padding: 14px 22px; color: #afd3bc; background: #75b8930a; border-bottom: 1px solid var(--border); font-size: 12px; line-height: 1.6; }
+.sync-notice.error { color: #e3a5a5; background: #d884840a; }

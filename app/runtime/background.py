@@ -45,7 +45,7 @@ def poll_accounts(settings, provider, label, factory):
                 result = factory(db=db, settings=scoped).poll()
                 health = {"last_poll_at": _now_iso(), "last_status": "ERROR" if result.get("errors") else "OK",
                           "last_decision": result.get("decision"),
-                          "last_error": "Some checks failed. Check service access." if result.get("errors") else None}
+                          "last_error": ("; ".join(error["detail"] for error in result["errors"])[:1000] if provider == "github" else "Some checks failed. Check service access.") if result.get("errors") else None}
             except Exception as exc:
                 db.rollback()
                 health = {"last_poll_at": _now_iso(), "last_status": "ERROR", "last_error": _safe_error(exc)}

@@ -1,6 +1,7 @@
 "use client";
 
 import GitHubWorkspace from "@/components/GitHubWorkspace";
+import { branchNameError, repositoryError } from "@/lib/github-validation";
 import CalendarWorkspace from "@/components/CalendarWorkspace";
 import AutomationCanvas from "@/components/AutomationCanvas";
 import { actionLabels, actionsFor, isConnected, routeReady, services } from "@/lib/automation-graph";
@@ -91,6 +92,9 @@ export default function AutomationBuilder() {
   const [selected, setSelected] = useState<Automation | null>(null);
   const [draft, setDraft] = useState<AutomationInput>(emptyAutomation);
   const [status, setStatus] = useState("Loading workspace...");
+  const [configurationError, setConfigurationError] = useState("");
+  const [syncNotice, setSyncNotice] = useState<{error: boolean; message: string} | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -174,6 +178,7 @@ export default function AutomationBuilder() {
   }, [connections, selected, isDirty, draft.source]);
 
   function selectAutomation(item: Automation | null) {
+    setConfigurationError(""); setSyncNotice(null);
     setSelected(item);
     setPreview(null);
     setRunResult(null);
@@ -188,6 +193,7 @@ export default function AutomationBuilder() {
   }
 
   function updateDraft(mutator: (current: AutomationInput) => AutomationInput) {
+    setConfigurationError("");
     setDraft((current) => mutator(current));
     setIsDirty(true);
   }
@@ -219,17 +225,26 @@ export default function AutomationBuilder() {
       action_config: {...current.action_config, type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY"}}));
   }
 
-  function beginAutomation(requested?: AutomationInput["source"]) {
+  function beginAutomation(requested?: AutomationInput["source"], repository?: string, trigger?: AutomationInput["trigger_type"]) {
     const source = requested || (connections.find((item) => item.status === "CONNECTED")?.id as AutomationInput["source"] | undefined) || "gmail";
     selectAutomation(null);
     setDraft({...emptyAutomation, name: requested ? `${source === "github" ? "GitHub" : "Calendar"} watcher` : "New automation", source,
-      trigger_type: source === "gmail" ? "NEW_EMAIL" : source === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
-      action_config: {type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY", instructions: ""}});
+      trigger_type: trigger || (source === "gmail" ? "NEW_EMAIL" : source === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED"),
+      action_config: {type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY", instructions: "", ...(repository ? {repository} : {})}});
     setActiveView("AUTOMATIONS"); setInspectorOpen(true);
   }
 
   async function save() {
     if (isSaving || !canSave) return;
+    const action = String(draft.action_config.type);
+    if (draft.source === "github" || action.startsWith("CREATE_GITHUB_")) {
+      const problem = repositoryError(String(draft.action_config.repository || ""));
+      if (problem) {setConfigurationError(problem); setInspectorOpen(true); return;}
+    }
+    if (action === "CREATE_GITHUB_BRANCH") {
+      const problem = branchNameError(String(draft.action_config.branch || "")) || branchNameError(String(draft.action_config.from_ref || "main"));
+      if (problem) {setConfigurationError(problem); setInspectorOpen(true); return;}
+    }
     setIsSaving(true);
     setStatus("Saving...");
     try {
@@ -254,6 +269,7 @@ export default function AutomationBuilder() {
       setExecutionDraft("");
       setStatus(`Saved · ${saved.approval_policy === "AUTO" ? "Automatic" : nice(saved.approval_policy)}`);
     } catch (error: any) {
+      setConfigurationError(error.message); setInspectorOpen(true);
       setStatus(`Save failed: ${error.message}`);
     } finally {
       setIsSaving(false);
@@ -284,10 +300,17 @@ export default function AutomationBuilder() {
   }
 
   async function runLatestEmail(force = false) {
-    if (!selected) return;
+    if (!selected || isSyncing) return;
     if (selected.source === "github") {
-      try { const result = await api.pollGithub(); setStatus(nice(result.decision)); await refreshOperations(); }
-      catch (error: any) { setStatus(`GitHub sync failed: ${error.message}`); }
+      setIsSyncing(true); setSyncNotice(null);
+      try {
+        const result = await api.pollGithub();
+        const failures = result.errors || [];
+        const message = failures.length ? failures.map((failure) => `${failure.repository || "GitHub watcher"}: ${failure.detail}`).join("; ") : result.baselines_initialized ? "Watcher baseline saved. Existing pull requests, issues and runs are history; subsequent matching changes will create notifications." : result.decision === "NO_AUTOMATIONS" ? "No enabled GitHub watchers. Enable and save a watcher before syncing." : result.decision === "NOT_CONNECTED" ? "Reconnect GitHub to start this watcher." : `Sync complete. ${result.processed} changed items checked.`;
+        setSyncNotice({error: failures.length > 0 || result.decision === "NOT_CONNECTED", message});
+        setStatus(nice(result.decision)); await refreshOperations();
+      } catch (error: any) {setSyncNotice({error: true, message: error.message}); setStatus(`GitHub sync failed: ${error.message}`);}
+      finally {setIsSyncing(false);}
       return;
     }
     if (selected.source === "google_calendar") {
@@ -480,12 +503,13 @@ export default function AutomationBuilder() {
               <div className="topbar-actions">
                 {selected && <button className="secondary-button" onClick={() => beginAutomation()}>New automation</button>}
                 {selected?.source === "gmail" && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
-                {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : selected.source === "github" ? "Sync GitHub" : "Sync Calendar"}</button>}
+                {selected && <button className="ghost-button" disabled={isSyncing} onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : selected.source === "github" ? "Sync GitHub" : "Sync Calendar"}</button>}
                 <button className="secondary-button configuration-toggle" onClick={() => setInspectorOpen(!inspectorOpen)} aria-expanded={inspectorOpen}>Configure</button>
                 <button className="primary-button" onClick={save} disabled={isSaving || !canSave}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
               </div>
             </header>
 
+            {syncNotice && <div className={`sync-notice ${syncNotice.error ? "error" : ""}`} role={syncNotice.error ? "alert" : "status"}>{syncNotice.message}</div>}
             <AutomationCanvas draft={draft} connections={connections} onSource={selectSource} onAction={(action) => updateAction("type", action)}/>
 
             {preview && (
@@ -548,6 +572,7 @@ export default function AutomationBuilder() {
           <aside className="inspector" aria-label="Automation configuration">
             <button className="ghost-button inspector-close" onClick={() => setInspectorOpen(false)}>Close configuration ×</button>
             <div className="inspector-heading"><span className="eyebrow">Configuration</span><h2>Automation logic</h2><p>Define what Jiraya should notice, what context it may use, and what action it may take.</p></div>
+            {configurationError && <div className="route-notice" role="alert">{configurationError}</div>}
             <label>Name<input value={draft.name} onChange={(e) => updateDraft((current) => ({ ...current, name: e.target.value }))} /></label>
             <label>Description<textarea value={draft.description} onChange={(e) => updateDraft((current) => ({ ...current, description: e.target.value }))} /></label>
             <label>Trigger source<select aria-label="Trigger source" value={draft.source} onChange={(e) => selectSource(e.target.value as AutomationInput["source"])}>
@@ -584,7 +609,7 @@ export default function AutomationBuilder() {
         </>
       ) : (
         <section className={`operations-page ${["GITHUB", "CALENDAR"].includes(activeView) ? "service-page" : ""}`}>
-          {activeView === "GITHUB" ? <GitHubWorkspace onCreateAutomation={() => beginAutomation("github")} /> : activeView === "CALENDAR" ? <CalendarWorkspace onCreateAutomation={() => beginAutomation("google_calendar")} /> : activeView === "NOTIFICATIONS" ? (
+          {activeView === "GITHUB" ? <GitHubWorkspace onCreateAutomation={(repository, trigger) => beginAutomation("github", repository, trigger)} /> : activeView === "CALENDAR" ? <CalendarWorkspace onCreateAutomation={() => beginAutomation("google_calendar")} /> : activeView === "NOTIFICATIONS" ? (
             <>
               <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>“Needs you” means you have work to review. “Done by Jiraya” is a completed automatic action. FYI is informational. State changes explain obligation lifecycle updates.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
               <div className="filter-tabs">

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { branchNameError } from "@/lib/github-validation";
 import ServiceIcon from "./ServiceIcon";
 import ServiceMonitor from "./ServiceMonitor";
 import { api, GithubItem, GithubRepository, ServiceStatus } from "@/lib/api";
 
-export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomation: () => void}) {
+export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomation: (repository: string, trigger: "GITHUB_ISSUE_CHANGED" | "GITHUB_PR_CHANGED" | "GITHUB_WORKFLOW_CHANGED") => void}) {
   const [service, setService] = useState<ServiceStatus | null>(null);
   const [repos, setRepos] = useState<GithubRepository[]>([]);
   const [repository, setRepository] = useState("");
@@ -15,6 +16,7 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
   const [activityLoading, setActivityLoading] = useState(false);
   const [actionTab, setActionTab] = useState<"issue" | "branch" | "workflow">("issue");
   const [search, setSearch] = useState("");
+  const [activityErrors, setActivityErrors] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,6 +24,9 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [branch, setBranch] = useState("");
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState("");
   const [ref, setRef] = useState("main");
   const [workflow, setWorkflow] = useState("");
   const [inputs, setInputs] = useState("{}");
@@ -53,22 +58,33 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
     const [owner, repo] = repository.split("/");
     setActivityLoading(true);
     setItems({issues: [], pulls: [], runs: []});
-    setError("");
+    setActivityErrors([]);
     Promise.allSettled([api.listGithubIssues(owner, repo), api.listGithubPulls(owner, repo), api.listGithubWorkflowRuns(owner, repo)])
       .then((results) => {
         if (cancelled) return;
         const rows = results.map((r) => r.status === "fulfilled" ? r.value.items : []);
         setActivityLoading(false);
         setItems({issues: rows[0].filter((i) => !i.pull_request), pulls: rows[1], runs: rows[2]});
-        const failures = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
-        if (failures.length) setError(failures.map((r) => String(r.reason.message)).join("; "));
+        setActivityErrors(results.flatMap((result, index) => result.status === "rejected" ? [`${["Issues", "Pull requests", "Workflows"][index]}: ${result.reason.message}`] : []));
       });
     return () => { cancelled = true; };
   }, [repository, revision]);
 
   useEffect(() => {
-    setRef(repos.find((r) => r.full_name === repository)?.default_branch || "main");
-  }, [repository]);
+    if (!repository || actionTab !== "branch") return;
+    let cancelled = false;
+    const [owner, repo] = repository.split("/");
+    setBranchesLoading(true); setBranchesError(""); setBranches([]);
+    api.listGithubBranches(owner, repo).then((result) => {
+      if (cancelled) return;
+      const names = result.items.map((item) => item.name);
+      setBranches(names);
+      const defaultBranch = repos.find((item) => item.full_name === repository)?.default_branch;
+      setRef((current) => names.includes(current) ? current : defaultBranch && names.includes(defaultBranch) ? defaultBranch : names[0] || "");
+    }).catch((e: Error) => {if (!cancelled) setBranchesError(e.message);})
+      .finally(() => {if (!cancelled) setBranchesLoading(false);});
+    return () => {cancelled = true;};
+  }, [repository, actionTab, revision]);
 
   function chooseRepository(value: string) {
     setRepository(value);
@@ -78,6 +94,12 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
 
   async function action(kind: "issue" | "branch" | "workflow") {
     if (busy || !repository) return;
+    if (kind === "branch") {
+      const problem = branchNameError(branch);
+      if (problem) {setError(`New branch name: ${problem}`); return;}
+      if (!branches.includes(ref)) {setError("Select an existing source branch."); return;}
+      if (branches.includes(branch)) {setError("That branch already exists. Choose a different new branch name."); return;}
+    }
     setBusy(true); setError(""); setFeedback("");
     const [owner, repo] = repository.split("/");
     try {
@@ -102,8 +124,9 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
   const selectedRepo = repos.find((item) => item.full_name === repository);
   const time = (value?: string) => value ? new Date(value).toLocaleDateString([], {month: "short", day: "numeric"}) : "";
   return <div className="service-workspace github-workspace">
-    <header className="service-header"><div className="service-title"><span className="service-app-icon github"><ServiceIcon service="github" size={25}/></span><div><span className="eyebrow">Your connected workspace</span><h1>GitHub</h1><p>{service?.connected ? `Connected as ${service.account}` : "Your repositories and the work around them."}</p></div></div><div className="service-header-actions"><button className="secondary-button icon-label" disabled={busy || loading} onClick={() => setRevision((v) => v+1)}><ServiceIcon service="refresh" size={15}/>Refresh</button><button className="primary-button" disabled={!service?.connected} onClick={onCreateAutomation}>Create watcher</button></div></header>
+    <header className="service-header"><div className="service-title"><span className="service-app-icon github"><ServiceIcon service="github" size={25}/></span><div><span className="eyebrow">Your connected workspace</span><h1>GitHub</h1><p>{service?.connected ? `Connected as ${service.account}` : "Your repositories and the work around them."}</p></div></div><div className="service-header-actions"><button className="secondary-button icon-label" disabled={busy || loading} onClick={() => setRevision((v) => v+1)}><ServiceIcon service="refresh" size={15}/>Refresh</button><button className="primary-button" disabled={!service?.connected || !repository} onClick={() => onCreateAutomation(repository, tab === "pulls" ? "GITHUB_PR_CHANGED" : tab === "runs" ? "GITHUB_WORKFLOW_CHANGED" : "GITHUB_ISSUE_CHANGED")}>Create watcher</button></div></header>
     {error && <div className="service-alert" role="alert">{error}</div>}
+    {activityErrors.map((message) => <div key={message} className="service-alert" role="alert">{message}</div>)}
     {feedback && <div className="service-alert success" role="status">{feedback}</div>}
     {loading && <div className="loading-state" role="status">Loading your GitHub workspace…</div>}
     {!loading && !service?.connected ? <div className="service-empty"><ServiceIcon service="github" size={38}/><h2>Your development activity, in one place</h2><p>Connect GitHub to inspect repositories, track changes and automate follow-up work.</p><button className="primary-button" onClick={async () => {try {const result = await api.startConnection("github"); window.location.assign(result.authorization_url);} catch (e: any) {setError(e.message);}}}>Connect GitHub</button></div> : service?.connected && <>
@@ -119,10 +142,10 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
       </section><aside className="repo-action-panel"><span className="eyebrow">Repository actions</span><h2>Move the work forward</h2><p className="action-panel-intro">Make an explicit change in the selected repository.</p><div className="action-type-tabs">{(["issue", "branch", "workflow"] as const).map((kind) => <button key={kind} disabled={busy} className={actionTab === kind ? "active" : ""} onClick={() => setActionTab(kind)}>{kind === "issue" ? "Issue" : kind === "branch" ? "Branch" : "Workflow"}</button>)}</div>
         <form onSubmit={(e) => {e.preventDefault();action(actionTab);}}>
           {actionTab === "issue" ? <><label>Issue title<input required value={title} onChange={(e) => setTitle(e.target.value)} maxLength={256} placeholder="What needs attention?"/></label><label>Description<textarea rows={5} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add the context and expected outcome…"/></label></> : <>
-            <label>{actionTab === "branch" ? "Source branch" : "Workflow ref"}<input required value={ref} onChange={(e) => setRef(e.target.value)}/></label>
-            {actionTab === "branch" ? <label>New branch name<input required value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="feature/follow-up"/></label> : <><label>Workflow filename or ID<input required placeholder="build.yml" value={workflow} onChange={(e) => setWorkflow(e.target.value)}/></label><label>Inputs (JSON)<textarea rows={4} value={inputs} onChange={(e) => setInputs(e.target.value)}/></label><p className="form-note">The workflow must support manual dispatch. A request is not a confirmed run result.</p></>}
+            {actionTab === "branch" ? <label>Source branch<select aria-label="Source branch" required value={ref} disabled={branchesLoading || !branches.length} onChange={(e) => setRef(e.target.value)}><option value="">{branchesLoading ? "Loading branches…" : "Choose an existing branch"}</option>{branches.map((name) => <option key={name} value={name}>{name}</option>)}</select>{branchesError && <span role="alert" className="form-note">{branchesError}</span>}{!branchesLoading && !branchesError && !branches.length && <span className="form-note">This repository has no branches. Create its first commit on GitHub.</span>}</label> : <label>Workflow ref<input required value={ref} onChange={(e) => setRef(e.target.value)}/></label>}
+            {actionTab === "branch" ? <label>New branch name<input aria-label="New branch name" required maxLength={240} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="feature/follow-up"/><span className="form-note">Use a Git branch name without spaces, such as feature/follow-up.</span></label> : <><label>Workflow filename or ID<input required placeholder="build.yml" value={workflow} onChange={(e) => setWorkflow(e.target.value)}/></label><label>Inputs (JSON)<textarea rows={4} value={inputs} onChange={(e) => setInputs(e.target.value)}/></label><p className="form-note">The workflow must support manual dispatch. A request is not a confirmed run result.</p></>}
           </>}
-          <button className="primary-button" disabled={busy}>{busy ? "Working…" : actionTab === "issue" ? "Create issue" : actionTab === "branch" ? "Create branch" : "Request workflow run"}<span>↗</span></button>
+          <button className="primary-button" disabled={busy || (actionTab === "branch" && (branchesLoading || !branches.includes(ref)))}>{busy ? "Working…" : actionTab === "issue" ? "Create issue" : actionTab === "branch" ? "Create branch" : "Request workflow run"}<span aria-hidden="true">↗</span></button>
         </form><div className="action-panel-footer"><ServiceIcon service="check" size={15}/><span>Uses your connected GitHub account and the app's external-action policy.</span></div>
       </aside></div>}
       <p className="workspace-note">Create a watcher to turn repository changes into notifications. The first poll establishes a baseline.</p>

@@ -1,3 +1,5 @@
+import { apiErrorMessage } from "./form-errors";
+
 export type Automation = {
   id: string;
   name: string;
@@ -174,7 +176,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       window.dispatchEvent(new Event("jiraya-session-expired"));
     }
     let message = `Request failed with ${response.status}`;
-    try { const body = await response.json(); message = typeof body.detail === "string" ? body.detail : "Please check the entered details."; } catch {}
+    try { const body = await response.json(); message = apiErrorMessage(body, response.status); } catch {}
     throw new Error(message);
   }
   if (response.status === 204) return undefined as T;
@@ -232,7 +234,7 @@ export const api = {
   githubConnectUrl: () => `${API_BASE}/connections/github/start`,
   pollCalendar: () => request<{decision: string}>("/runtime/calendar/poll", { method: "POST" }),
   calendarStatus: () => request<ServiceStatus>("/calendar/status"),
-  pollGithub: () => request<{decision: string}>("/runtime/github/poll", {method: "POST"}),
+  pollGithub: () => request<{decision: string; processed: number; baselines_initialized?: number; errors?: {automation_id: string; repository: string; detail: string}[]}>("/runtime/github/poll", {method: "POST"}),
   githubStatus: () => request<ServiceStatus>("/github/status"),
   disconnectCalendar: () =>
     request<{ disconnected: boolean; provider: string }>("/connections/google/calendar/disconnect", {
@@ -253,6 +255,7 @@ export const api = {
   createCalendarEvent: (input: Record<string, unknown>) =>
     request<any>("/calendar/events", { method: "POST", body: JSON.stringify(input) }),
   githubProfile: () => request<any>("/github/profile"),
+  listGithubBranches: (owner: string, repo: string) => request<{items: {name: string}[]}>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`),
   listGithubRepos: (limit = 30) => request<{items: GithubRepository[]}>(`/github/repos?limit=${limit}`),
   listGithubWorkflowRuns: (owner: string, repo: string, limit = 20) =>
     request<{items: GithubItem[]}>(`/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflow-runs?limit=${limit}`),

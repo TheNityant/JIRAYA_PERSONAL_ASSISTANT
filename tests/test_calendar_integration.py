@@ -16,7 +16,6 @@ from app.runtime.calendar_runtime import CalendarRuntimeService
 from app.services.automation_store import AutomationStore
 from app.services.runtime_state_store import RuntimeStateStore
 
-
 PROPOSAL = {
     "summary": "Project review",
     "description": "Review current progress",
@@ -251,3 +250,52 @@ def test_calendar_runs_even_when_gmail_thread_is_already_tracked(db, monkeypatch
     assert result["path"] == "RECONCILIATION"
     assert calls[0]["message_id"] == "new-reply"
     assert result["calendar_results"][0]["result"]["decision"] == "AWAITING_APPROVAL"
+
+
+def test_calendar_agenda_defaults_to_bounded_recurrence_window(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    calls = []
+    def list_events(**kwargs):
+        calls.append(kwargs)
+        return [{"id": "birthday_20261025", "recurringEventId": "birthday"}]
+    monkeypatch.setattr("app.routes.calendar.get_calendar_client", lambda *a: SimpleNamespace(list_events=list_events))
+    before = datetime.now(UTC)
+    with TestClient(app) as client:
+        response = client.get("/calendar/events")
+    assert response.status_code == 200
+    body = response.json()
+    start = datetime.fromisoformat(calls[0]["time_min"])
+    end = datetime.fromisoformat(calls[0]["time_max"])
+    assert before <= start <= datetime.now(UTC)
+    assert end - start == timedelta(days=30)
+    assert body["items"][0]["recurringEventId"] == "birthday"
+    assert body["time_max"] == calls[0]["time_max"]
+    assert body["limit_reached"] is False
+
+
+def test_calendar_agenda_passes_selected_range_and_limit(monkeypatch):
+    calls = []
+    def list_events(**kwargs):
+        calls.append(kwargs)
+        return [{"id": "one"}, {"id": "two"}]
+    monkeypatch.setattr("app.routes.calendar.get_calendar_client", lambda *a: SimpleNamespace(list_events=list_events))
+    with TestClient(app) as client:
+        response = client.get("/calendar/events", params={"time_min": "2026-10-19T00:00:00+05:30", "time_max": "2026-10-26T00:00:00+05:30", "limit": 2})
+    assert response.status_code == 200
+    assert calls == [{"calendar_id": "primary", "time_min": "2026-10-19T00:00:00+05:30", "time_max": "2026-10-26T00:00:00+05:30", "max_results": 2}]
+    assert response.json()["limit_reached"] is True
+
+
+@pytest.mark.parametrize("start,end", [
+    ("not-a-date", "2026-10-26T00:00:00Z"),
+    ("2026-10-19T00:00:00", "2026-10-26T00:00:00Z"),
+    ("2026-10-19T00:00:00Z", "2026-10-19T00:00:00Z"),
+    ("2026-10-26T00:00:00Z", "2026-10-19T00:00:00Z"),
+])
+def test_calendar_invalid_range_never_calls_provider(monkeypatch, start, end):
+    def unexpected(*args):
+        pytest.fail("Invalid dates must be rejected before accessing Google")
+    monkeypatch.setattr("app.routes.calendar.get_calendar_client", unexpected)
+    with TestClient(app) as client:
+        assert client.get("/calendar/events", params={"time_min": start, "time_max": end}).status_code == 422

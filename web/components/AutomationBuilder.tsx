@@ -1,19 +1,11 @@
 "use client";
 
 import GitHubWorkspace from "@/components/GitHubWorkspace";
+import CalendarWorkspace from "@/components/CalendarWorkspace";
+import AutomationCanvas from "@/components/AutomationCanvas";
+import { actionLabels, actionsFor, isConnected, routeReady, services } from "@/lib/automation-graph";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  Background,
-  Controls,
-  Edge,
-  MarkerType,
-  Node,
-  Position,
-  ReactFlow,
-  useNodesState,
-} from "@xyflow/react";
-
+import { useEffect, useState } from "react";
 import {
   api,
   Automation,
@@ -23,7 +15,6 @@ import {
   GmailRuntimeStatus,
   JirayaNotification,
   Obligation,
-  ServiceStatus,
 } from "@/lib/api";
 
 const emptyAutomation: AutomationInput = {
@@ -94,37 +85,6 @@ function notificationIcon(category: string): string {
   }
 }
 
-function buildNodes(draft: AutomationInput): Node[] {
-  const semantic = str(draft.match_config.semantic_condition) || "Any configured match";
-  const action = str(draft.action_config.type) || "DRAFT_REPLY";
-  const items = [
-    ["trigger", "Trigger", draft.source === "gmail" ? "Gmail · New email" : draft.source === "github" ? `GitHub · ${nice(draft.trigger_type.replace(/^GITHUB_/, ""))}` : "Calendar · Event changed", 0, 120],
-    ["match", "Match", semantic, 250, 120],
-    ["context", "Context", str(draft.context_config.instructions) || "User context", 500, 120],
-    ["action", "Action", action.replaceAll("_", " "), 750, 120],
-    ["approval", "Approval", draft.approval_policy.replaceAll("_", " "), 1000, 120],
-    ["verify", "Verifier", "Prove the action happened", 350, 370],
-    ["reconcile", "Reconciliator", "Observe later world changes", 650, 370],
-    ["obligation", "Obligation", "Track remaining work", 950, 370],
-  ] as const;
-
-  return items.map(([id, title, detail, x, y]) => ({
-    id,
-    position: { x, y },
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    data: {
-      label: (
-        <div className={`flow-node ${["verify", "reconcile", "obligation"].includes(id) ? "assurance-node" : ""}`}>
-          <span className="flow-node-kicker">{title}</span>
-          <strong>{detail}</strong>
-        </div>
-      ),
-    },
-    style: { width: 210 },
-  }));
-}
-
 export default function AutomationBuilder() {
   const [activeView, setActiveView] = useState<View>("AUTOMATIONS");
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -143,11 +103,10 @@ export default function AutomationBuilder() {
   const [notificationFilter, setNotificationFilter] = useState("ALL");
   const [obligations, setObligations] = useState<Obligation[]>([]);
   const [obligationFilter, setObligationFilter] = useState<"OPEN" | "RESOLVED">("OPEN");
-  const [calendar, setCalendar] = useState<ServiceStatus | null>(null);
-  const [calendarEvents, setCalendarEvents] = useState<Awaited<ReturnType<typeof api.listCalendarEvents>>["items"]>([]);
-  const [calendarError, setCalendarError] = useState("");
   const [runtime, setRuntime] = useState<GmailRuntimeStatus | null>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(buildNodes(emptyAutomation));
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const canSave = routeReady(draft, connections);
+  const allowedActions = actionsFor(draft.source, connections);
 
   async function refresh(preferredId?: string) {
     const list = await api.listAutomations();
@@ -160,18 +119,6 @@ export default function AutomationBuilder() {
   async function refreshConnections() {
     const response = await api.listConnections();
     setConnections(response.catalog);
-  }
-
-  async function refreshCalendar() {
-    try {
-      const service = await api.calendarStatus();
-      setCalendar(service);
-      if (service.connected) {
-        const events = await api.listCalendarEvents();
-        setCalendarEvents(events.items);
-      } else setCalendarEvents([]);
-      setCalendarError("");
-    } catch (error: any) { setCalendarError(error.message); }
   }
 
   async function refreshRuntime() {
@@ -208,43 +155,23 @@ export default function AutomationBuilder() {
   }, []);
 
   useEffect(() => {
-    const delay = activeView === "AUTOMATIONS" ? 15000 : 5000;
+    const operations = activeView === "NOTIFICATIONS" || activeView === "OBLIGATIONS";
     const timer = window.setInterval(() => {
-      if (activeView === "CALENDAR") {
-        refreshCalendar();
-        refreshConnections().catch(() => undefined);
-      } else if (activeView === "AUTOMATIONS") {
-        refreshRuntime().catch(() => undefined);
-      } else {
-        refreshOperations().catch(() => undefined);
-      }
-    }, delay);
-    if (activeView === "CALENDAR") refreshCalendar();
-    if (activeView !== "AUTOMATIONS") refreshOperations().catch(() => undefined);
+      if (operations) refreshOperations().catch(() => undefined);
+      else Promise.all([refreshRuntime(), refreshConnections()]).catch(() => undefined);
+    }, operations ? 5000 : 15000);
+    if (operations) refreshOperations().catch(() => undefined);
     return () => window.clearInterval(timer);
   }, [activeView]);
 
-  const flowSignature = [
-    draft.source,
-    draft.trigger_type,
-    str(draft.match_config.semantic_condition),
-    str(draft.context_config.instructions),
-    str(draft.action_config.type),
-    draft.approval_policy,
-  ].join("\u0000");
-
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const fresh = buildNodes(draft);
-      setNodes((current) =>
-        current.map((node) => {
-          const replacement = fresh.find((item) => item.id === node.id);
-          return replacement ? { ...node, data: replacement.data, style: replacement.style } : node;
-        }),
-      );
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, [flowSignature, setNodes]);
+    if (!selected && !isDirty && !isConnected(connections, draft.source)) {
+      const first = connections.find((item) => item.status === "CONNECTED");
+      if (first) setDraft((current) => ({...current, source: first.id as AutomationInput["source"],
+        trigger_type: first.id === "gmail" ? "NEW_EMAIL" : first.id === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
+        action_config: {...current.action_config, type: first.id === "gmail" ? "DRAFT_REPLY" : "NOTIFY"}}));
+    }
+  }, [connections, selected, isDirty, draft.source]);
 
   function selectAutomation(item: Automation | null) {
     setSelected(item);
@@ -259,26 +186,6 @@ export default function AutomationBuilder() {
     }
     setDraft(toInput(item));
   }
-
-  const edges = useMemo<Edge[]>(() => {
-    const links = [
-      ["trigger", "match"],
-      ["match", "context"],
-      ["context", "action"],
-      ["action", "approval"],
-      ["approval", "verify"],
-      ["verify", "reconcile"],
-      ["reconcile", "obligation"],
-    ];
-    return links.map(([source, target]) => ({
-      id: `${source}-${target}`,
-      source,
-      target,
-      type: "smoothstep",
-      animated: true,
-      markerEnd: { type: MarkerType.ArrowClosed },
-    }));
-  }, []);
 
   function updateDraft(mutator: (current: AutomationInput) => AutomationInput) {
     setDraft((current) => mutator(current));
@@ -306,8 +213,23 @@ export default function AutomationBuilder() {
     }));
   }
 
+  function selectSource(source: AutomationInput["source"]) {
+    updateDraft((current) => ({...current, source,
+      trigger_type: source === "gmail" ? "NEW_EMAIL" : source === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
+      action_config: {...current.action_config, type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY"}}));
+  }
+
+  function beginAutomation(requested?: AutomationInput["source"]) {
+    const source = requested || (connections.find((item) => item.status === "CONNECTED")?.id as AutomationInput["source"] | undefined) || "gmail";
+    selectAutomation(null);
+    setDraft({...emptyAutomation, name: requested ? `${source === "github" ? "GitHub" : "Calendar"} watcher` : "New automation", source,
+      trigger_type: source === "gmail" ? "NEW_EMAIL" : source === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
+      action_config: {type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY", instructions: ""}});
+    setActiveView("AUTOMATIONS"); setInspectorOpen(true);
+  }
+
   async function save() {
-    if (isSaving) return;
+    if (isSaving || !canSave) return;
     setIsSaving(true);
     setStatus("Saving...");
     try {
@@ -425,8 +347,7 @@ export default function AutomationBuilder() {
       else if (item.id === "github") await api.disconnectGithub();
       await refreshConnections();
       await refreshRuntime();
-      await refreshCalendar();
-      setStatus(`${item.label} disconnected`);
+        setStatus(`${item.label} disconnected`);
     } catch (error: any) { setStatus(`Disconnect failed: ${error.message}`); }
   }
 
@@ -464,7 +385,7 @@ export default function AutomationBuilder() {
   );
 
   return (
-    <main className={`workspace ${activeView !== "AUTOMATIONS" ? "wide-view" : ""}`}>
+    <main className={`workspace ${activeView !== "AUTOMATIONS" ? "wide-view" : ""} ${inspectorOpen ? "config-open" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">J</div>
@@ -486,7 +407,7 @@ export default function AutomationBuilder() {
 
         <div className="sidebar-title-row">
           <span>Automations</span>
-          <button className="icon-button" onClick={() => { selectAutomation(null); setActiveView("AUTOMATIONS"); }} title="New automation">+</button>
+          <button className="icon-button" onClick={() => beginAutomation()} title="New automation">+</button>
         </div>
 
         <div className="automation-list">
@@ -533,7 +454,7 @@ export default function AutomationBuilder() {
           <strong className="runtime-line">
             <span className={`status-dot ${runtime?.background_monitor_enabled ? "on" : "off"}`} />
             {runtime?.background_monitor_enabled
-              ? `Gmail monitoring · ${runtime.poll_seconds}s`
+              ? `Gmail monitoring · ${runtime.poll_seconds ?? "—"}s`
               : monitorConfiguredButUnhealthy
                 ? "Gmail monitor needs attention"
                 : "Gmail monitor paused"}
@@ -557,28 +478,15 @@ export default function AutomationBuilder() {
                 </span>
               </div>
               <div className="topbar-actions">
+                {selected && <button className="secondary-button" onClick={() => beginAutomation()}>New automation</button>}
                 {selected?.source === "gmail" && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
                 {selected && <button className="ghost-button" onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : selected.source === "github" ? "Sync GitHub" : "Sync Calendar"}</button>}
-                <button className="primary-button" onClick={save} disabled={isSaving}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
+                <button className="secondary-button configuration-toggle" onClick={() => setInspectorOpen(!inspectorOpen)} aria-expanded={inspectorOpen}>Configure</button>
+                <button className="primary-button" onClick={save} disabled={isSaving || !canSave}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
               </div>
             </header>
 
-            <div className="flow-area">
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                nodesDraggable
-                fitView
-                fitViewOptions={{ padding: 0.18 }}
-                minZoom={0.45}
-                maxZoom={1.5}
-                proOptions={{ hideAttribution: true }}
-              >
-                <Background gap={22} size={1} />
-                <Controls showInteractive={false} />
-              </ReactFlow>
-            </div>
+            <AutomationCanvas draft={draft} connections={connections} onSource={selectSource} onAction={(action) => updateAction("type", action)}/>
 
             {preview && (
               <div className={`preview-strip ${preview.match?.matches ? "matched" : "not-matched"}`}>
@@ -637,27 +545,31 @@ export default function AutomationBuilder() {
             )}
           </section>
 
-          <aside className="inspector">
+          <aside className="inspector" aria-label="Automation configuration">
+            <button className="ghost-button inspector-close" onClick={() => setInspectorOpen(false)}>Close configuration ×</button>
             <div className="inspector-heading"><span className="eyebrow">Configuration</span><h2>Automation logic</h2><p>Define what Jiraya should notice, what context it may use, and what action it may take.</p></div>
             <label>Name<input value={draft.name} onChange={(e) => updateDraft((current) => ({ ...current, name: e.target.value }))} /></label>
             <label>Description<textarea value={draft.description} onChange={(e) => updateDraft((current) => ({ ...current, description: e.target.value }))} /></label>
-            <label>Trigger source<select value={draft.source} onChange={(e) => updateDraft((current) => ({...current,
-              source: e.target.value as AutomationInput["source"],
-              trigger_type: e.target.value === "gmail" ? "NEW_EMAIL" : e.target.value === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
-              action_config: { ...current.action_config, type: e.target.value === "gmail" ? "DRAFT_REPLY" : "NOTIFY" },
-            }))}><option value="gmail">Gmail · New email</option><option value="google_calendar">Calendar · Event changed</option><option value="github">GitHub · Repository changes</option></select></label>
+            <label>Trigger source<select aria-label="Trigger source" value={draft.source} onChange={(e) => selectSource(e.target.value as AutomationInput["source"])}>
+              {services.filter((service) => isConnected(connections, service.id) || service.id === draft.source).map((service) => <option key={service.id} value={service.id} disabled={!isConnected(connections, service.id)}>{service.label}{!isConnected(connections, service.id) ? " · not connected" : ""}</option>)}
+            </select></label>
+            {!canSave && <div className="route-notice">Connect the selected trigger and action services to activate this workflow. You can connect accounts in the sidebar.</div>}
             {draft.source === "github" && <label>GitHub event<select value={draft.trigger_type} onChange={(e) => updateDraft((current) => ({...current, trigger_type: e.target.value as AutomationInput["trigger_type"]}))}><option value="GITHUB_ISSUE_CHANGED">Issue changed</option><option value="GITHUB_PR_CHANGED">Pull request changed</option><option value="GITHUB_WORKFLOW_CHANGED">Workflow run changed</option></select></label>}
             {(draft.source === "github" || ["CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"].includes(str(draft.action_config.type))) && <label>GitHub repository<input placeholder="TheNityant/repository-name" value={str(draft.action_config.repository)} onChange={(e) => updateAction("repository", e.target.value)}/></label>}
             <div className="section-divider" /><span className="section-title">Match {draft.source === "gmail" ? "incoming Gmail" : draft.source === "github" ? "GitHub changes" : "Calendar changes"}</span>
             <label>Semantic condition<textarea rows={5} placeholder="Example: A professor tells me an assignment/submission deadline." value={str(draft.match_config.semantic_condition)} onChange={(e) => updateMatch("semantic_condition", e.target.value)} /></label>
             <div className="two-column">
-              <label>{draft.source === "gmail" ? "Sender contains" : "Organizer filter (email only)"}<input disabled={draft.source !== "gmail"} value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>
+              {draft.source === "gmail" && <label>Sender contains<input value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>}
               <label>{draft.source === "gmail" ? "Subject contains" : draft.source === "github" ? "Issue / workflow title contains" : "Event title contains"}<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
             </div>
             <label>Body contains<input value={str(draft.match_config.body_contains)} onChange={(e) => updateMatch("body_contains", e.target.value)} /></label>
             <label>Personal context / operating instructions<textarea rows={4} value={str(draft.context_config.instructions)} onChange={(e) => updateContext("instructions", e.target.value)} /></label>
             <div className="section-divider" /><span className="section-title">Action &amp; policy</span>
-            <label>Action<select value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>{draft.source === "gmail" && <option value="DRAFT_REPLY">Draft reply</option>}<option value="NOTIFY">Notify me</option>{draft.source === "gmail" && <><option value="CREATE_CALENDAR_EVENT">Create calendar event</option><option value="CREATE_GITHUB_ISSUE">Create GitHub issue</option><option value="CREATE_GITHUB_BRANCH">Create GitHub branch</option></>}</select></label>
+            <label>Action<select aria-label="Action" value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>
+              {!allowedActions.includes(str(draft.action_config.type)) && <option disabled value={str(draft.action_config.type)}>{actionLabels[str(draft.action_config.type)] || "Select an action"} · connection required</option>}
+              {allowedActions.map((action) => <option key={action} value={action}>{actionLabels[action]}</option>)}
+            </select></label>
+            <p className="form-note">Only actions supported by your connected services are available.</p>
             {draft.action_config.type === "CREATE_GITHUB_BRANCH" && <>
               <label>New GitHub branch<input value={str(draft.action_config.branch)} onChange={(e) => updateAction("branch", e.target.value)} placeholder="feature/email-follow-up"/></label>
               <label>Source GitHub branch<input value={str(draft.action_config.from_ref) || "main"} onChange={(e) => updateAction("from_ref", e.target.value)}/></label>
@@ -671,20 +583,8 @@ export default function AutomationBuilder() {
           </aside>
         </>
       ) : (
-        <section className="operations-page">
-          {activeView === "GITHUB" ? <GitHubWorkspace /> : activeView === "CALENDAR" ? (
-            <>
-              <header className="operations-header"><div><span className="eyebrow">Google Calendar</span><h1>Your calendar, connected</h1><p>{calendar?.connected ? calendar.account : "Connect Calendar to create events from email and watch changes."}</p></div><button onClick={refreshCalendar}>Refresh</button></header>
-              {calendarError && <p role="alert">{calendarError}</p>}
-              {!calendar?.connected && <button className="primary-button" onClick={() => connect({id: "google_calendar", label: "Google Calendar"} as ConnectionCatalogItem)}>Connect Calendar</button>}
-              {calendar?.connected && <p>{calendar.background_monitor_configured ? `Change monitoring · ${calendar.poll_seconds}s` : "Background monitoring disabled"} · {calendar.monitor?.last_decision ? nice(calendar.monitor.last_decision) : "Waiting for first cycle"}{calendar.monitor?.last_error ? ` · ${calendar.monitor.last_error}` : ""}</p>}
-              <div className="operations-list">
-                {calendarEvents.map((event) => <article className="obligation-card" key={event.id}><strong>{event.summary ?? "Untitled event"}</strong><p>{event.start?.dateTime ? when(event.start.dateTime) : event.start?.date} — {event.end?.dateTime ? when(event.end.dateTime) : event.end?.date}</p>{event.htmlLink && <a href={event.htmlLink} target="_blank" rel="noreferrer">Open in Google Calendar</a>}</article>)}
-                {calendar?.connected && !calendarEvents.length && !calendarError && <p>No upcoming events.</p>}
-              </div>
-              <p>Create a Calendar change automation with “Notify me” to receive event updates. The first sync establishes a baseline.</p>
-            </>
-          ) : activeView === "NOTIFICATIONS" ? (
+        <section className={`operations-page ${["GITHUB", "CALENDAR"].includes(activeView) ? "service-page" : ""}`}>
+          {activeView === "GITHUB" ? <GitHubWorkspace onCreateAutomation={() => beginAutomation("github")} /> : activeView === "CALENDAR" ? <CalendarWorkspace onCreateAutomation={() => beginAutomation("google_calendar")} /> : activeView === "NOTIFICATIONS" ? (
             <>
               <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>“Needs you” means you have work to review. “Done by Jiraya” is a completed automatic action. FYI is informational. State changes explain obligation lifecycle updates.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
               <div className="filter-tabs">

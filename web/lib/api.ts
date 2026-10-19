@@ -88,8 +88,9 @@ export type ConnectionsResponse = {
   catalog: ConnectionCatalogItem[];
 };
 
+export type CalendarEvent = {id: string; summary?: string; htmlLink?: string; recurringEventId?: string; location?: string; description?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}};
 export type GithubRepository = {id: number; full_name: string; html_url: string; default_branch: string; private: boolean};
-export type GithubItem = {id: number; number?: number; title?: string; name?: string; body?: string; state?: string; status?: string; conclusion?: string; html_url?: string; pull_request?: unknown};
+export type GithubItem = {id: number; number?: number; title?: string; name?: string; body?: string; state?: string; status?: string; conclusion?: string; html_url?: string; pull_request?: unknown; updated_at?: string; created_at?: string; head_branch?: string; run_number?: number; user?: {login?: string}; labels?: Array<{name: string}>};
 
 export type ServiceStatus = {
   connected: boolean;
@@ -241,7 +242,12 @@ export const api = {
     request<{ disconnected: boolean; provider: string }>("/connections/github/disconnect", {
       method: "POST",
     }),
-  listCalendarEvents: (limit = 20) => request<{items: Array<{id: string; summary?: string; htmlLink?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}}> }>(`/calendar/events?limit=${limit}`),
+  listCalendarEvents: (limit = 100, timeMin?: string, timeMax?: string) => {
+    const params = new URLSearchParams({limit: String(limit)});
+    if (timeMin) params.set("time_min", timeMin);
+    if (timeMax) params.set("time_max", timeMax);
+    return request<{items: CalendarEvent[]; time_min: string; time_max: string; limit_reached: boolean}>(`/calendar/events?${params}`);
+  },
   calendarFreeBusy: (input: Record<string, unknown>) =>
     request<any>("/calendar/freebusy", { method: "POST", body: JSON.stringify(input) }),
   createCalendarEvent: (input: Record<string, unknown>) =>

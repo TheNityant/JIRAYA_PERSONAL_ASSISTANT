@@ -212,3 +212,7 @@ Phase 1 adds tests for structured email classification, deterministic Gmail veri
 - LangSmith tracing
 
 Those come after this vertical slice is reliable.
+
+### Checkpoint your open development projects
+
+The GitHub workspace now includes an opt-in local workspace checkpoint: one button commits saved changes and pushes enabled open repositories to their configured branches. It uses a separately started local companion and the included VS Code extension, so a deployed cloud backend never needs access to your desktop folders. See [setup, supported IDEs and checkpoint behavior](docs/WORKSPACE_CHECKPOINT.md).

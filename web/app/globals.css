@@ -390,6 +390,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 .checkpoint-setup code { color: #c7bced; font-size: 11px; overflow-wrap: anywhere; }
 .checkpoint-panel label { display: grid; gap: 7px; color: var(--muted); font-size: 11px; }
 .checkpoint-setup form { display: grid; grid-template-columns: 1fr 85px; gap: 12px; align-items: end; }
+.checkpoint-setup .checkpoint-token-visibility { grid-column: 1/-1; display: flex; align-items: center; gap: 8px; }
+.checkpoint-token-visibility input { width: 16px; height: 16px; padding: 0; }
 .checkpoint-setup button { grid-column: 1/-1; font-size: 11px; }
 .checkpoint-toolbar { margin-top: 20px; padding: 15px 0; border-top: 1px solid var(--border); align-items: center; }
 .checkpoint-toolbar > span { font-size: 11px; color: var(--soft); }

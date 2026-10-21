@@ -1,0 +1,17 @@
+fastapi<1.0.0,>=0.118.0
+uvicorn[standard]<1.0.0,>=0.37.0
+openai<3.0.0,>=2.0.0
+pydantic<3.0.0,>=2.11.0
+pydantic-settings<3.0.0,>=2.10.0
+sqlalchemy<3.0.0,>=2.0.40
+psycopg[binary]<4.0.0,>=3.2.0
+cryptography<47.0.0,>=46.0.0
+httpx<1.0.0,>=0.28.0
+google-api-python-client<3.0.0,>=2.150.0
+google-auth<3.0.0,>=2.35.0
+google-auth-oauthlib<2.0.0,>=1.2.0
+google-auth-httplib2<1.0.0,>=0.2.0
+
+[dev]
+pytest<9.0.0,>=8.4.0
+ruff<1.0.0,>=0.13.0

@@ -3,7 +3,7 @@
 import { useEffect, useMemo } from "react";
 import { Background, Controls, Edge, Handle, Node, NodeProps, Position, ReactFlow, useNodesState } from "@xyflow/react";
 import type { AutomationInput, ConnectionCatalogItem } from "@/lib/api";
-import { actionLabels, actionTarget, isConnected, services } from "@/lib/automation-graph";
+import { calendarScheduling, actionLabels, actionTarget, isConnected, services } from "@/lib/automation-graph";
 import ServiceIcon from "./ServiceIcon";
 
 type CardData = {label: string; detail: string; kicker: string; service: string; connected?: boolean; active?: boolean; role: string; badge?: string; color?: string};
@@ -21,6 +21,7 @@ const nodeTypes = {card: Card};
 export default function AutomationCanvas({draft, connections, onSource, onAction}: {draft: AutomationInput; connections: ConnectionCatalogItem[]; onSource: (source: AutomationInput["source"]) => void; onAction: (action: string) => void}) {
   const action = String(draft.action_config.type || "DRAFT_REPLY");
   const target = actionTarget(action);
+  const scheduling = calendarScheduling(draft);
   const nodes = useMemo<CardNode[]>(() => {
     const cards: CardNode[] = [];
     for (const [i, service] of services.entries()) {
@@ -35,17 +36,19 @@ export default function AutomationCanvas({draft, connections, onSource, onAction
       {id: "target:notify", type: "card", position: {x: 900, y: 555}, data: {label: "Notifications", detail: "Deliver an update inside Jiraya", kicker: "Workspace", service: "notify", role: "destination", active: target === "notify"}},
       {id: "evidence", type: "card", position: {x: 600, y: 500}, data: {label: target === "notify" ? "Notification saved" : "Verify the outcome", detail: target === "notify" ? "Keep a durable record in your workspace" : "Check the provider and record the result", kicker: "Execution evidence", service: "check", role: "evidence"}},
     );
+    if (scheduling) cards.push({id:"availability",type:"card",position:{x:600,y:0},data:{label:"Check Calendar availability",detail:"Check free/busy and working hours; recheck before sending",kicker:"Read-only scheduling context",service:"google_calendar",role:"logic",active:true}});
     if (action === "DRAFT_REPLY") cards.push({id: "work", type: "card", position: {x: 300, y: 555}, data: {label: "Track later changes", detail: "Reconcile the email thread and outstanding work", kicker: "After a reply", service: "refresh", role: "work"}});
     return cards.map((card) => ({...card, style: {width: 235}, draggable: true}));
-  }, [draft.source, draft.approval_policy, draft.match_config.semantic_condition, draft.action_config.instructions, action, connections]);
+  }, [draft.source, draft.approval_policy, draft.match_config.semantic_condition, draft.action_config.instructions, action, scheduling, connections]);
   const [displayNodes, setNodes, onNodesChange] = useNodesState<CardNode>(nodes);
   useEffect(() => {setNodes((current) => nodes.map((node) => ({...node, position: current.find((n) => n.id === node.id)?.position || node.position})));}, [nodes, setNodes]);
   const edges = useMemo<Edge[]>(() => {
     const all: Edge[] = services.filter((s) => isConnected(connections, s.id)).map((s) => ({id: `in:${s.id}`, source: `source:${s.id}`, target: "match", className: draft.source === s.id ? "route-active" : "route-available", animated: draft.source === s.id, type: "smoothstep"}));
     for (const [source, destination] of [["match", "policy"], ["policy", "action"], ["action", `target:${target}`], [`target:${target}`, "evidence"]]) all.push({id: `${source}->${destination}`, source, target: destination, className: "route-active", type: "smoothstep", animated: true});
+    if (scheduling) all.push({id:"read-calendar",source:"source:google_calendar",target:"availability",className:"route-active",type:"smoothstep",animated:true},{id:"schedule-reply",source:"availability",target:"action",className:"route-active",type:"smoothstep",animated:true});
     if (action === "DRAFT_REPLY") all.push({id: "follow-up", source: `target:${target}`, target: "work", className: "route-available", type: "smoothstep"});
     return all;
-  }, [connections, draft.source, target, action]);
+  }, [connections, draft.source, target, action, scheduling]);
   return <div className="flow-area">
     <div className="graph-toolbar"><div><span className="eyebrow">Connected service network</span><p>Choose a trigger. Follow the action to its destination.</p></div><span className="status-pill"><i/>{connections.filter((c) => c.status === "CONNECTED").length} connected</span></div>
     <ReactFlow nodes={displayNodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeClick={(_, node) => {

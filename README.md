@@ -220,3 +220,7 @@ The GitHub workspace now includes an opt-in local workspace checkpoint: one butt
 ## Optional Hermes developer briefing
 
 The GitHub workspace can summarize recent activity across up to three repositories through a dedicated, operator-configured Hermes profile. It defaults to disabled and does not execute suggested actions. See [Hermes briefing setup and multi-repository tests](docs/HERMES_BRIEFING.md).
+
+## Calendar-backed scheduling replies
+
+Gmail reply automations can optionally check selected Google Calendars and propose free meeting times. Configure working hours, timezone and approval policy in the frontend. See [setup and test cases](docs/SCHEDULING_REPLIES.md).

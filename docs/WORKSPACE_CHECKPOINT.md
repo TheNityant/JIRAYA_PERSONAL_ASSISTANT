@@ -89,3 +89,18 @@ Repeat `--origin` to allow additional origins. Permit the browser's local-networ
 The included VSIX is built from `extensions/jiraya-workspace` with `npx --yes @vscode/vsce package --allow-missing-repository`. No Marketplace publication is required for local installation.
 
 `tests/test_workspace_checkpoint.py` exercises real temporary local repositories and bare remotes, including saved changes, unpushed commits, branch targeting, failed pushes/retry, diverged remotes, multiple projects, credential filename exclusions, open-window registration and loopback API pairing. The pairing regression test uses a real isolated companion and Chromium, including password-manager changes that bypass React state. Run it from `web` with `node tests/workspace-pairing.cjs` after installing Playwright and its Chromium browser (`npm install --no-save playwright`, then `npx playwright install chromium`). It requires the project Python dependencies. It temporarily creates a test route, uses ports 3117 and 8876, and removes its route and test configuration when finished; it never performs a checkpoint or push. Other browser checks use controlled companion responses. These tests do not establish that a particular Windows Git credential setup or browser policy is configured correctly.
+
+## Companion port already in use
+
+Only one companion may listen on `127.0.0.1:8765`. Re-running the command does not replace the existing process. The launcher now reserves its socket before creating state or printing a token, then passes the reserved socket to Uvicorn. An occupied/unavailable port exits with a clear diagnostic without printing a new pairing token or terminating another process.
+
+Keep using the existing companion, or wait for any active checkpoint to finish and stop it with Ctrl+C in its original terminal before restarting updated code. To identify the listener in PowerShell:
+
+```powershell
+$listenerPid = Get-NetTCPConnection -LocalPort 8765 -State Listen |
+    Select-Object -First 1 -ExpandProperty OwningProcess
+Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" |
+    Select-Object ProcessId, Name, CommandLine
+```
+
+If its command line confirms it is the Jiraya companion and its original terminal is unavailable, `Stop-Process -Id $listenerPid` stops that identified process. Do not stop an unidentified process. If another application needs this port, use `python -m app.local_companion serve --port 8766` and set the same port in the frontend, VS Code's `jiraya.companionPort` setting and any `watch --port 8766` command. The main backend uses port 8000; the frontend normally uses 3000.

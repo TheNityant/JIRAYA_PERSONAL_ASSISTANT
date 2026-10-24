@@ -1,5 +1,6 @@
 "use client";
 
+import SchedulingSettings from "@/components/SchedulingSettings";
 import GitHubWorkspace from "@/components/GitHubWorkspace";
 import { branchNameError, repositoryError } from "@/lib/github-validation";
 import CalendarWorkspace from "@/components/CalendarWorkspace";
@@ -173,7 +174,7 @@ export default function AutomationBuilder() {
       const first = connections.find((item) => item.status === "CONNECTED");
       if (first) setDraft((current) => ({...current, source: first.id as AutomationInput["source"],
         trigger_type: first.id === "gmail" ? "NEW_EMAIL" : first.id === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
-        action_config: {...current.action_config, type: first.id === "gmail" ? "DRAFT_REPLY" : "NOTIFY"}}));
+        action_config: {...current.action_config, type: first.id === "gmail" ? "DRAFT_REPLY" : "NOTIFY", calendar_scheduling: {enabled:false}}}));
     }
   }, [connections, selected, isDirty, draft.source]);
 
@@ -215,14 +216,14 @@ export default function AutomationBuilder() {
   function updateAction(key: string, value: unknown) {
     updateDraft((current) => ({
       ...current,
-      action_config: { ...current.action_config, [key]: value },
+      action_config: { ...current.action_config, [key]: value, ...(key === "type" && value !== "DRAFT_REPLY" ? {calendar_scheduling: {enabled:false}} : {}) },
     }));
   }
 
   function selectSource(source: AutomationInput["source"]) {
     updateDraft((current) => ({...current, source,
       trigger_type: source === "gmail" ? "NEW_EMAIL" : source === "github" ? "GITHUB_ISSUE_CHANGED" : "CALENDAR_CHANGED",
-      action_config: {...current.action_config, type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY"}}));
+      action_config: {...current.action_config, type: source === "gmail" ? "DRAFT_REPLY" : "NOTIFY", calendar_scheduling: {enabled:false}}}));
   }
 
   function beginAutomation(requested?: AutomationInput["source"], repository?: string, trigger?: AutomationInput["trigger_type"]) {
@@ -526,10 +527,13 @@ export default function AutomationBuilder() {
                   {runResult.match && <span className="execution-confidence">{Math.round(runResult.match.confidence * 100)}% match</span>}
                 </div>
                 {runResult.action_route && <div className="route-note"><strong>{nice(runResult.action_route.decision)}</strong><span>{runResult.action_route.reason}</span></div>}
+                {execution?.action_type === "DRAFT_REPLY" && str(execution.output.reason) && <p className="service-alert" role="alert">{str(execution.output.reason)}</p>}
+                {execution?.action_type === "DRAFT_REPLY" && !executionDraft && runResult.decision === "EXISTING_EXECUTION" && <button className="secondary-button" onClick={() => runLatestEmail(true)}>Regenerate draft</button>}
                 {execution?.action_type === "DRAFT_REPLY" && executionDraft && (
                   <div className="draft-workspace">
-                    <label>Generated reply<textarea rows={8} value={executionDraft} onChange={(event) => setExecutionDraft(event.target.value)} readOnly={execution.status === "VERIFIED_SUCCESS"} /></label>
+                    <label>Generated reply<textarea rows={8} value={executionDraft} onChange={(event) => setExecutionDraft(event.target.value)} readOnly={execution.status === "VERIFIED_SUCCESS" || Boolean(execution.output.calendar_scheduling)} /></label>
                     <div className="execution-actions">
+                      {Boolean(execution.output.calendar_scheduling) && execution.status !== "VERIFIED_SUCCESS" && <span className="execution-note">Calendar availability is rechecked before sending. Regenerate the reply to change its validated times.</span>}
                       {execution.approval_policy === "DRAFT_ONLY" && <span className="execution-note">Draft-only policy: Jiraya will not send this message.</span>}
                       {execution.status === "BLOCKED_BY_POLICY" && <span className="execution-note warning">External actions are disabled.</span>}
                       {execution.status === "VERIFIED_SUCCESS" && <span className="execution-note success">Sent and verified by Gmail.</span>}
@@ -600,6 +604,7 @@ export default function AutomationBuilder() {
               <label>Source GitHub branch<input value={str(draft.action_config.from_ref) || "main"} onChange={(e) => updateAction("from_ref", e.target.value)}/></label>
             </>}
             {draft.action_config.type === "CREATE_CALENDAR_EVENT" && <div className="policy-explainer">Provide your timezone and any default event duration in context. Jiraya prepares a dated event from matching emails; unclear times produce a notification. Calendar invitations are not sent.</div>}
+            {draft.source === "gmail" && draft.action_config.type === "DRAFT_REPLY" && <SchedulingSettings value={draft.action_config.calendar_scheduling} connected={isConnected(connections,"google_calendar")} onChange={value => updateAction("calendar_scheduling",value)}/>}
             <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>
             <label>Approval policy<select value={draft.approval_policy} onChange={(e) => updateDraft((current) => ({ ...current, approval_policy: e.target.value as AutomationInput["approval_policy"] }))}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>
             {draft.approval_policy === "AUTO" && <div className="policy-explainer">Automatic means no approval prompt for a normal match. Jiraya acts when the configured action safely covers the message; changed or out-of-scope situations become a notification instead of silently switching back to approval.</div>}

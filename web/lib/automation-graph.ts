@@ -14,5 +14,6 @@ export function actionsFor(source: string, connections: ConnectionCatalogItem[])
   return Object.keys(actionLabels).filter((action) => action === "NOTIFY" || (source === "gmail" && isConnected(connections, actionTarget(action))));
 }
 export function routeReady(draft: AutomationInput, connections: ConnectionCatalogItem[]) {
-  return isConnected(connections, draft.source) && actionsFor(draft.source, connections).includes(String(draft.action_config.type || "DRAFT_REPLY"));
+  return isConnected(connections, draft.source) && actionsFor(draft.source, connections).includes(String(draft.action_config.type || "DRAFT_REPLY")) && (!calendarScheduling(draft) || isConnected(connections, "google_calendar"));
 }
+export function calendarScheduling(draft: AutomationInput) {return draft.source === "gmail" && draft.action_config.type === "DRAFT_REPLY" && (draft.action_config.calendar_scheduling as Record<string, unknown> | undefined)?.enabled === true;}

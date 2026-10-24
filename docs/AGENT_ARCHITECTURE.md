@@ -53,3 +53,7 @@ Automated tests use controlled model/provider responses. Frontend smoke tests us
 See [HERMES_AGENT_PROPOSAL.md](HERMES_AGENT_PROPOSAL.md) for the proposed cloud agent boundary. A bounded GitHub-only briefing pilot now calls a configured Hermes API with pre-collected metadata; see [HERMES_BRIEFING.md](HERMES_BRIEFING.md). Dynamic agent-selected tools and queued cloud workers remain future work. The current automation executor and provider adapters remain in use.
 
 Calendar display checks run from `web`: `node --test tests/calendar-agenda.cjs` and `node tests/calendar-browser.cjs` (the latter requires Playwright and Chromium). The browser regression uses mocked provider responses and a temporary route on port 3118; it covers Today/Upcoming separation, local-midnight rollover, range navigation, mobile layout and stale-data clearing after an error.
+
+## Calendar-backed Gmail scheduling
+
+The optional [scheduling reply path](SCHEDULING_REPLIES.md) extracts meeting timing with the model, computes free slots deterministically from selected calendars, and rechecks availability before sending. It does not depend on Hermes. Calendar-triggered proactive email follow-ups and automatic event bookings remain separate future features.

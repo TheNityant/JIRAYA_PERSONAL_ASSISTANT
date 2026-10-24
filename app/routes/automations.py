@@ -103,6 +103,17 @@ def _validate_logic(values: dict) -> None:
     source = values["source"]
     trigger = values["trigger_type"]
     action = (values.get("action_config") or {}).get("type", "DRAFT_REPLY")
+    scheduling = (values.get("action_config") or {}).get("calendar_scheduling") or {}
+    if not isinstance(scheduling, dict):
+        raise HTTPException(422, "Calendar scheduling must be an object")
+    if scheduling.get("enabled"):
+        from app.automation.scheduling_reply import SchedulingPolicy
+        try:
+            SchedulingPolicy.model_validate(scheduling)
+        except ValueError as exc:
+            raise HTTPException(422, "Use valid scheduling timezone, working hours, weekdays, duration and calendars") from exc
+        if source != "gmail" or action != "DRAFT_REPLY":
+            raise HTTPException(422, "Calendar-backed scheduling is available only for Gmail replies")
     allowed = {("gmail", "NEW_EMAIL"), ("google_calendar", "CALENDAR_CHANGED"),
                ("github", "GITHUB_ISSUE_CHANGED"), ("github", "GITHUB_PR_CHANGED"),
                ("github", "GITHUB_WORKFLOW_CHANGED")}

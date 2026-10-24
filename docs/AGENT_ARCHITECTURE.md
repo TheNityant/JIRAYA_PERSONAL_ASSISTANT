@@ -40,8 +40,16 @@ Django provides an integrated ORM, migrations, authentication, admin UI and othe
 
 ## Calendar recurrence display
 
+The calendar separates the selected day (Today by default) from Upcoming, grouped by local date. Tomorrow’s events are never promoted as today’s featured event. Date-only events use local midnight, all-day end dates remain exclusive, and Today advances after local midnight.
+
 The agenda defaults to a bounded 30-day window; the frontend offers 7, 30 and 90 days and adjacent windows. Google expands recurring events into instances, so an unbounded request can return the same birthday in future years. Bounding the query resolves that display issue without deleting legitimate occurrences. Only duplicate provider IDs are deduplicated. All-day event end dates are exclusive and are displayed accordingly.
 
 ## Validation boundary
 
 Automated tests use controlled model/provider responses. Frontend smoke tests use mocked API responses and exercise rendering and interactions. Neither establishes that a particular deployed OAuth client, token scope or real provider account is currently healthy; that requires live account testing.
+
+## Proposed Hermes worker
+
+See [HERMES_AGENT_PROPOSAL.md](HERMES_AGENT_PROPOSAL.md) for the proposed cloud agent boundary. This is not yet implemented; the current executor and provider adapters remain in use.
+
+Calendar display checks run from `web`: `node --test tests/calendar-agenda.cjs` and `node tests/calendar-browser.cjs` (the latter requires Playwright and Chromium). The browser regression uses mocked provider responses and a temporary route on port 3118; it covers Today/Upcoming separation, local-midnight rollover, range navigation, mobile layout and stale-data clearing after an error.

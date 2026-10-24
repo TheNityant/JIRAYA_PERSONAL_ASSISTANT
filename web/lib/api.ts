@@ -90,7 +90,7 @@ export type ConnectionsResponse = {
   catalog: ConnectionCatalogItem[];
 };
 
-export type CalendarEvent = {id: string; summary?: string; htmlLink?: string; recurringEventId?: string; location?: string; description?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}};
+export type CalendarEvent = {id: string; status?: string; summary?: string; htmlLink?: string; recurringEventId?: string; location?: string; description?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}};
 export type GithubRepository = {id: number; full_name: string; html_url: string; default_branch: string; private: boolean};
 export type GithubItem = {id: number; number?: number; title?: string; name?: string; body?: string; state?: string; status?: string; conclusion?: string; html_url?: string; pull_request?: unknown; updated_at?: string; created_at?: string; head_branch?: string; run_number?: number; user?: {login?: string}; labels?: Array<{name: string}>};
 

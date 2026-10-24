@@ -419,3 +419,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 
 .checkpoint-registration details { margin: 12px 0; font-size: 12px; color: var(--muted); }
 .checkpoint-registration li { margin: 8px 0; overflow-wrap: anywhere; }
+
+.calendar-upcoming { margin-top: 20px; }
+.agenda-day-heading { margin: 0; padding: 13px 24px; background: #93b7ef08; border-bottom: 1px solid var(--border); color: var(--soft); font-size: 11px; font-weight: 500; letter-spacing: .02em; }
+.agenda-day-group + .agenda-day-group { border-top: 1px solid var(--border); }
+.calendar-clear-day { padding: 28px 20px; }
+@media (max-width: 650px) {
+  .calendar-workspace .agenda-controls { flex-wrap: wrap; }
+  .calendar-workspace .agenda-row { flex-wrap: wrap; }
+  .calendar-workspace .agenda-row > .service-link { margin-left: 57px; }
+  .agenda-day-heading { padding: 12px 15px; }
+}

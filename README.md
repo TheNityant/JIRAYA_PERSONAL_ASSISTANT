@@ -216,3 +216,7 @@ Those come after this vertical slice is reliable.
 ### Checkpoint your open development projects
 
 The GitHub workspace now includes an opt-in local workspace checkpoint: one button commits saved changes and pushes enabled open repositories to their configured branches. It uses a separately started local companion and the included VS Code extension, so a deployed cloud backend never needs access to your desktop folders. See [setup, supported IDEs and checkpoint behavior](docs/WORKSPACE_CHECKPOINT.md).
+
+## Optional Hermes developer briefing
+
+The GitHub workspace can summarize recent activity across up to three repositories through a dedicated, operator-configured Hermes profile. It defaults to disabled and does not execute suggested actions. See [Hermes briefing setup and multi-repository tests](docs/HERMES_BRIEFING.md).

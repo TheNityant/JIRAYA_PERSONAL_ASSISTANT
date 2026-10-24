@@ -92,6 +92,12 @@ export type ConnectionsResponse = {
 
 export type CalendarEvent = {id: string; status?: string; summary?: string; htmlLink?: string; recurringEventId?: string; location?: string; description?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}};
 export type GithubRepository = {id: number; full_name: string; html_url: string; default_branch: string; private: boolean};
+export type DeveloperBriefingResult = {
+  run_id: string | null; provider: "hermes" | "none"; summary: string; generated_at: string;
+  repositories: string[]; scope: string;
+  sources: Array<{id: string; repository: string; kind: string; title: string; url: string}>;
+  coverage: Array<{repository: string; kind: string; loaded?: number; limit?: number; error?: string}>;
+};
 export type GithubItem = {id: number; number?: number; title?: string; name?: string; body?: string; state?: string; status?: string; conclusion?: string; html_url?: string; pull_request?: unknown; updated_at?: string; created_at?: string; head_branch?: string; run_number?: number; user?: {login?: string}; labels?: Array<{name: string}>};
 
 export type ServiceStatus = {
@@ -187,6 +193,8 @@ export type Account = {id: string; email: string; display_name: string};
 export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
 
 export const api = {
+  developerBriefingStatus: () => request<{configured: boolean; message: string}>("/github/briefing/status"),
+  createDeveloperBriefing: (repositories: string[]) => request<DeveloperBriefingResult>("/github/briefing", {method: "POST", signal: AbortSignal.timeout(180000), body: JSON.stringify({repositories})}),
   account: () => request<AccountState>("/auth/me"),
   login: (email: string, password: string) => request<{user: Account}>("/auth/login", {method: "POST", body: JSON.stringify({email, password})}),
   register: (display_name: string, email: string, password: string) => request<{user: Account}>("/auth/register", {method: "POST", body: JSON.stringify({display_name, email, password})}),

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { branchNameError } from "@/lib/github-validation";
 import WorkspaceCheckpoint from "./WorkspaceCheckpoint";
+import DeveloperBriefing from "./DeveloperBriefing";
 import ServiceIcon from "./ServiceIcon";
 import ServiceMonitor from "./ServiceMonitor";
 import { api, GithubItem, GithubRepository, ServiceStatus } from "@/lib/api";
@@ -132,6 +133,7 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
     {feedback && <div className="service-alert success" role="status">{feedback}</div>}
     {loading && <div className="loading-state" role="status">Loading your GitHub workspace…</div>}
     {!loading && !service?.connected ? <div className="service-empty"><ServiceIcon service="github" size={38}/><h2>Your development activity, in one place</h2><p>Connect GitHub to inspect repositories, track changes and automate follow-up work.</p><button className="primary-button" onClick={async () => {try {const result = await api.startConnection("github"); window.location.assign(result.authorization_url);} catch (e: any) {setError(e.message);}}}>Connect GitHub</button></div> : service?.connected && <>
+      <DeveloperBriefing repositories={repos}/>
       <div className="service-stats"><div><span>Accessible repositories</span><strong>{repos.length}<small>in this view</small></strong></div><div><span>Selected repository</span><strong className="stat-text">{repository.split("/")[1] || "Choose a repository"}</strong><small>{selectedRepo?.private ? "Private repository" : "Repository activity and actions"}</small></div><ServiceMonitor service={service} label="GitHub"/></div>
       <div className="repo-toolbar"><div className="repo-picker"><ServiceIcon service="github"/><label htmlFor="repository-select">Repository</label><select id="repository-select" value={repository} onChange={(e) => chooseRepository(e.target.value)}><option value="">Choose a repository</option>{repos.map((repo) => <option key={repo.id} value={repo.full_name}>{repo.full_name}{repo.private ? " · private" : ""}</option>)}</select></div>{selectedRepo && <a className="service-link" href={selectedRepo.html_url} target="_blank" rel="noreferrer">View repository ↗</a>}</div>
       {!repos.length && <div className="service-empty compact"><h3>No repositories available</h3><p>Check the connected account's repository permissions, then refresh.</p></div>}

@@ -202,3 +202,34 @@ def test_pr_hash_upgrade_starts_baseline_without_replaying_old_prs(db, monkeypat
     assert runtime.poll()["baselines_initialized"] == 1
     assert runtime.poll()["processed"] == 0
     assert not db.scalars(select(Notification)).all()
+
+
+def test_two_repository_watchers_keep_separate_baselines_and_notifications(db, monkeypatch):
+    first = rule(db, trigger="GITHUB_PR_CHANGED")
+    second = rule(db, trigger="GITHUB_PR_CHANGED")
+    second.action_config = {**second.action_config, "repository": "owner/notebook"}
+    db.commit()
+    rows = {
+        "repo": [{"id": 42, "number": 3, "title": "Jiraya PR", "state": "open", "head": {"sha": "first"}}],
+        "notebook": [{"id": 42, "number": 3, "title": "Notebook PR", "state": "open", "head": {"sha": "first"}}],
+    }
+    github = GitHub()
+    github.list_pulls = lambda **kwargs: rows[kwargs["repo"]]
+    monkeypatch.setattr("app.runtime.github_runtime.get_github_client", lambda *args: github)
+    monkeypatch.setattr("app.runtime.github_runtime.ConnectionStore.get_active", lambda *args, **kwargs: SimpleNamespace(id="connection"))
+    runtime = GitHubRuntimeService(db=db, settings=Settings())
+    assert runtime.poll()["baselines_initialized"] == 2
+    assert not db.scalars(select(Notification)).all()
+    rows["repo"][0]["title"] = "Jiraya PR changed"
+    assert runtime.poll()["processed"] == 1
+    notification = db.scalars(select(Notification)).one()
+    assert notification.automation_id == first.id
+    assert "owner/repo" in notification.message
+    rows["notebook"][0]["title"] = "Notebook PR changed"
+    assert runtime.poll()["processed"] == 1
+    notifications = db.scalars(select(Notification)).all()
+    assert len(notifications) == 2
+    assert {item.automation_id for item in notifications} == {first.id, second.id}
+    assert any("owner/notebook" in item.message for item in notifications)
+    assert runtime.poll()["processed"] == 0
+    assert len(db.scalars(select(Notification)).all()) == 2

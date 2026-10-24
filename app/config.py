@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     nebius_model: str = "nvidia/Nemotron-3_5-Lightning"
     nebius_timeout_seconds: float = 60.0
 
+    # Operator-configured, single-account Hermes briefing pilot. End users never
+    # receive this service credential or configure their own backend endpoint.
+    hermes_briefing_enabled: bool = False
+    hermes_base_url: str = ""
+    hermes_api_key: str = Field(default="", repr=False)
+    hermes_model: str = "hermes-agent"
+    hermes_owner_user_id: str = ""
+    hermes_timeout_seconds: float = Field(default=60, ge=5, le=90)
+
     database_url: str = "postgresql+psycopg://jiraya:jiraya_dev_password@localhost:5432/jiraya"
     enable_external_actions: bool = False
 

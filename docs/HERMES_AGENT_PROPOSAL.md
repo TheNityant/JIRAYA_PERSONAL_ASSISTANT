@@ -1,6 +1,6 @@
 # Proposed Hermes worker for Jiraya
 
-Status: architecture proposal, not a deployed integration. No Hermes endpoint, credentials, MCP server or account access is enabled by this change. Assumes Nous Research's Hermes Agent.
+Status: future agent-worker architecture proposal. The first bounded GitHub briefing pilot is now implemented; see [HERMES_BRIEFING.md](HERMES_BRIEFING.md) for its narrower scope and operator setup. Cloud deployment, dynamic MCP tool use and the durable queue described below are not implemented. Assumes Nous Research's Hermes Agent.
 
 ## Purpose
 

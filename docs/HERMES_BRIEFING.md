@@ -10,11 +10,9 @@ The feature defaults to disabled. Implementing the adapter does not launch a Dig
 
 ## App-owner setup
 
-### Frontend demo without credentials
+### Is a separate Hermes runtime necessary?
 
-Open `/demo/hermes` on the Jiraya frontend (for example `http://localhost:3000/demo/hermes`). This standalone page does not require login, a backend, GitHub OAuth or DigitalOcean credentials. Search/select up to three example repositories and generate a simulated briefing. All activity counts, statuses and recommendations are explicitly labeled sample data; this is not live Hermes inference or a repository audit.
-
-The connected GitHub briefing panel also has **Try demo without credentials**, which uses the loaded repository names with illustrative activity. **Live briefing** returns to the existing real integration. No demo selection runs Git commands, sends email or submits a model request.
+No. The core Gmail, Calendar, GitHub watchers and local checkpoints do not depend on Hermes. The current pilot sends a bounded metadata snapshot for summarization with native toolsets disabled; equivalent summarization could use the existing model adapter without another agent runtime. This alternative has not been implemented by the Hermes pilot. Before paying for a runtime, compare factual accuracy, useful next steps, latency and per-briefing cost against that simpler baseline. Autonomous multi-step investigations would be a stronger reason to revisit a separate agent, with scoped tools and durable jobs first. The temporary frontend demo has been removed; it was not evidence of a live integration.
 
 Use a dedicated Hermes runtime/profile for one pilot user. This version rejects all other Jiraya user IDs; it is not a shared multi-user agent. The profile must have every native toolset disabled. Keep it separate from personal Hermes memory, credentials, cron jobs and unrelated conversations. The adapter checks `GET /v1/toolsets` before reading GitHub data and fails closed unless every returned toolset explicitly has `enabled: false` (an empty list is accepted). Prompt instructions alone do not enforce tool permissions.
 

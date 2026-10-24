@@ -13,6 +13,10 @@ class GitProblem(RuntimeError):
     pass
 
 
+class NotARepository(GitProblem):
+    pass
+
+
 def git(root: Path, *args: str, check: bool = True) -> str:
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never")
     try:
@@ -31,6 +35,16 @@ def git(root: Path, *args: str, check: bool = True) -> str:
         ) from exc
     if check and result.returncode:
         error = result.stderr.decode("utf-8", errors="replace").lower()
+        if "dubious ownership" in error or "unsafe repository" in error:
+            raise GitProblem(
+                "Git blocked this repository because of its ownership. Review the folder owner "
+                "and Git's safe.directory guidance locally; Jiraya does not change Git trust settings."
+            )
+        if "not a git repository" in error:
+            raise NotARepository(
+                "This folder is not inside a Git repository. Choose the existing repository folder "
+                "with Jiraya: Add Git Projects in VS Code. Do not create a new repository to pair it."
+            )
         if "non-fast-forward" in error or "fetch first" in error or "rejected" in error:
             raise GitProblem(
                 "Git rejected the push. The remote may have advanced or a branch rule may block direct pushes. Review it locally."
@@ -59,9 +73,11 @@ def git(root: Path, *args: str, check: bool = True) -> str:
 
 def repository_root(folder: str) -> Path:
     root = Path(folder).expanduser().resolve(strict=True)
-    top = git(root, "rev-parse", "--show-toplevel", check=False)
+    top = git(root, "rev-parse", "--show-toplevel")
     if not top:
-        raise GitProblem("Git could not identify this folder as a repository. Open the repository folder itself and check local Git access.")
+        raise GitProblem(
+            "Git could not identify this folder as a repository. Open the repository folder itself and check local Git access."
+        )
     return Path(top).resolve(strict=True)
 
 

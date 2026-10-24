@@ -6,16 +6,22 @@ const http=require('node:http');
 const path=require('node:path');
 
 function windowContext(port, folder, dirty=false, trusted=true, options={}) {
- const commands={},secretCalls=[],handlers={},messages={info:[],warning:[],error:[]},lines=[];
+ const commands={},secretCalls=[],handlers={},messages={info:[],warning:[],error:[]},lines=[],additions=[];
  const status={show(){},dispose(){}};
  let stored=options.storedToken ?? 'paired-token';
  const subscribe=name=>fn=>{handlers[name]=fn;return {dispose(){}};};
  const vscode={env:{remoteName:options.remoteName},StatusBarAlignment:{Left:1},workspace:{isTrusted:trusted,workspaceFolders:folder?[{uri:{scheme:'file',fsPath:folder}},{uri:{scheme:'vscode-remote',fsPath:'/remote/skip'}}]:[],textDocuments:dirty?[{isDirty:true,uri:{scheme:'file',fsPath:folder+'/file.js'}}]:[],getWorkspaceFolder:()=>({uri:{fsPath:folder}}),getConfiguration:()=>({get:()=>port}),onDidChangeWorkspaceFolders:subscribe('folders'),onDidSaveTextDocument:subscribe('save'),onDidCloseTextDocument:subscribe('close'),onDidChangeTextDocument:subscribe('edit'),onDidChangeConfiguration:subscribe('configuration'),saveAll:async()=>true},commands:{registerCommand:(name,fn)=>{commands[name]=fn;return {dispose(){}};}},window:{createOutputChannel:()=>({appendLine:line=>lines.push(line),show(){},dispose(){}}),createStatusBarItem:()=>status,showInputBox:async()=>options.input ?? 'paired-token',showInformationMessage:text=>messages.info.push(text),showErrorMessage:text=>messages.error.push(text),showWarningMessage:text=>messages.warning.push(text),withProgress:async(_opts,fn)=>fn({report(){}})},ProgressLocation:{Notification:1}};
+ vscode.workspace.getWorkspaceFolder=uri=>vscode.workspace.workspaceFolders.find(item=>item.uri.scheme==='file' && (uri.fsPath===item.uri.fsPath || uri.fsPath.startsWith(item.uri.fsPath+'/')));
+ if(options.dirtyPath)vscode.workspace.textDocuments=[{isDirty:true,uri:{scheme:'file',fsPath:options.dirtyPath}}];
+ const git={repositories:(options.gitRoots||[]).map(fsPath=>({rootUri:{scheme:'file',fsPath}})),onDidOpenRepository:subscribe('gitOpen'),onDidCloseRepository:subscribe('gitClose')};
+ if(options.gitRoots)vscode.extensions={getExtension:()=>({activate:async()=>({enabled:true,getAPI:()=>git})})};
+ vscode.window.showOpenDialog=async dialog=>{assert.equal(dialog.canSelectFolders,true);assert.equal(dialog.canSelectMany,true);return options.pickedFolders?.map(fsPath=>({scheme:'file',fsPath}));};
+ vscode.workspace.updateWorkspaceFolders=(index,remove,...folders)=>{additions.push(...folders);vscode.workspace.workspaceFolders.splice(index,remove,...folders);handlers.folders();return true;};
  const context={subscriptions:[],secrets:{onDidChange:subscribe('secret'),get:async()=>stored,store:async(...args)=>{secretCalls.push(args);stored=args[1];}}};
  const module={exports:{}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension.js'),'utf8'),{require:name=>name==='vscode'?vscode:require(name),module,Buffer,setInterval:()=>1,clearInterval(){},setTimeout,clearTimeout});
  module.exports.activate(context);
- return {api:module.exports,commands,secretCalls,status,messages,lines,handlers};
+ return {api:module.exports,commands,secretCalls,status,messages,lines,handlers,additions,git};
 }
 async function until(check) {for(let i=0;i<200;i++){if(check())return;await new Promise(r=>setTimeout(r,10));}throw Error('Timed out');}
 async function companion(fn, custom) {
@@ -105,4 +111,28 @@ test('background connection errors remain visible in the status bar and output',
  await until(()=>/Companion unavailable/.test(window.status.text||''));
  assert.match(window.lines.join('\n'),/Start it on the configured local port/);
  await window.api.deactivate();
+});
+
+test('VS Code Git contributes nested roots only inside this local workspace and tracks discovery changes',async()=>{
+ await companion(async(port,calls)=>{
+  const window=windowContext(port,'/projects/parent',false,true,{gitRoots:['/projects/parent/jiraya','/projects/parent/notebook','/elsewhere/private'],dirtyPath:'/projects/parent/notebook/src/changed.js'});
+  await until(()=>calls.some(call=>call.body?.folders?.includes('/projects/parent/notebook')));
+  const registration=calls.filter(call=>call.path==='/workspaces/heartbeat').at(-1).body;
+  assert.deepEqual(registration.folders,['/projects/parent','/projects/parent/jiraya','/projects/parent/notebook']);
+  assert.deepEqual(registration.unsaved_folders,['/projects/parent/notebook/src']);
+  window.git.repositories.splice(1,1);window.handlers.gitClose();
+  await until(()=>calls.filter(call=>call.path==='/workspaces/heartbeat').at(-1).body.folders.length===2);
+  await window.api.deactivate();
+ });
+});
+
+test('Add Git Projects picks multiple local folders and registers them without committing or pushing',async()=>{
+ await companion(async(port,calls)=>{
+  const window=windowContext(port,'/projects/parent',false,true,{pickedFolders:['/projects/one','/projects/two']});
+  await window.commands['jiraya.addProjects']();
+  await until(()=>calls.some(call=>call.body?.folders?.includes('/projects/two')));
+  assert.deepEqual(window.additions.map(item=>item.uri.fsPath),['/projects/one','/projects/two']);
+  assert.equal(calls.some(call=>call.path.startsWith('/checkpoints')),false);
+  await window.api.deactivate();
+ });
 });

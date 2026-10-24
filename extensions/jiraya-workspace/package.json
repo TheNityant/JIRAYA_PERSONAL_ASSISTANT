@@ -2,7 +2,7 @@
   "name": "jiraya-workspace",
   "displayName": "Jiraya Workspace Checkpoint",
   "description": "Register open local Git projects with Jiraya and checkpoint enabled repositories together.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "jiraya-local",
   "license": "MIT",
   "engines": {
@@ -20,6 +20,10 @@
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "jiraya.addProjects",
+        "title": "Jiraya: Add Git Projects"
+      },
       {
         "command": "jiraya.pair",
         "title": "Jiraya: Pair Local Companion"

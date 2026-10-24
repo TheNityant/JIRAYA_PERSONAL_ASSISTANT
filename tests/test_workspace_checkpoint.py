@@ -394,6 +394,67 @@ def test_registration_diagnostics_include_rejected_folders_and_expire(project, t
         assert client.get("/projects", headers=headers).json()["items"] == []
 
 
+def test_editor_detected_nested_repository_resolves_parent_registration(project, tmp_path):
+    root, _, _ = project
+    state = Companion(tmp_path / "state")
+    # A parent alone still cannot silently register every repository on disk.
+    result = state.heartbeat(WorkspaceHeartbeat(session_id="editor", folders=[str(tmp_path)]))
+    assert result["project_count"] == 0
+    assert result["issues"][0]["reason"] == "not_a_repository"
+    # The updated extension contributes the exact roots known to VS Code Git.
+    result = state.heartbeat(
+        WorkspaceHeartbeat(session_id="editor", folders=[str(tmp_path), str(root)])
+    )
+    assert result["project_count"] == 1
+    assert result["issues"] == []
+    assert state.projects()[0]["id"] == repo_id(root)
+    parent = state.registrations()["items"][0]["folders"][0]
+    assert parent["roots"] == [str(root)]
+    assert "detected by the editor" in parent["message"]
+
+
+def test_unsaved_nested_paths_and_other_window_parent_block_registered_repository(
+    project, tmp_path
+):
+    root, _, _ = project
+    state = Companion(tmp_path / "state")
+    state.heartbeat(WorkspaceHeartbeat(session_id="current", folders=[str(root)]))
+    state.heartbeat(
+        WorkspaceHeartbeat(
+            session_id="new-file",
+            folders=[str(tmp_path), str(root)],
+            unsaved_folders=[str(root / "not-created-yet" / "src")],
+        )
+    )
+    assert state.projects()[0]["unsaved"] is True
+    state.sessions.pop("new-file")
+    state.heartbeat(
+        WorkspaceHeartbeat(
+            session_id="older-window", folders=[str(tmp_path)], unsaved_folders=[str(tmp_path)]
+        )
+    )
+    assert state.projects()[0]["unsaved"] is True
+
+
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        ("fatal: not a git repository", "existing repository folder"),
+        ("fatal: detected dubious ownership in repository", "ownership"),
+    ],
+)
+def test_repository_registration_preserves_actionable_git_failure(
+    tmp_path, monkeypatch, error, expected
+):
+    monkeypatch.setattr(
+        workspace_git.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 128, b"", error.encode()),
+    )
+    with pytest.raises(GitProblem, match=expected):
+        workspace_git.repository_root(str(tmp_path))
+
+
 def test_api_flow_register_enable_checkpoint_verify_push_and_unregister(project, tmp_path):
     root, bare, _ = project
     app = create_companion(tmp_path / "state", ["http://localhost:3000"])

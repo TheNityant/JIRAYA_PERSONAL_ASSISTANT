@@ -80,20 +80,33 @@ async function main() {
     };
     await registration([config]); // Existing folder with no .git must produce an explanation.
     await page.getByRole('button', {name:'Refresh projects',exact:true}).click();
-    await page.getByText('Your editor is reporting, but no Git repositories were found.', {exact:false}).waitFor();
-    await page.getByText('Registration details', {exact:true}).click();
-    await page.getByText('Git could not identify this folder as a repository.', {exact:false}).waitFor();
+    await page.getByText('Your editor is connected, but Git has not confirmed any repositories.', {exact:false}).waitFor();
+    // Failed registration details are expanded automatically.
+    await page.getByText('This folder is not inside a Git repository.', {exact:false}).waitFor();
     const repo = path.join(config,'repository');fs.mkdirSync(repo);
     const git = (...args) => execFileSync('git',['-C',repo,...args],{stdio:'pipe'});
     git('init','--initial-branch=main');git('config','user.name','Pairing Regression');git('config','user.email','regression@example.test');
     fs.writeFileSync(path.join(repo,'readme.txt'),'isolated browser registration fixture');
     git('add','.');git('commit','-m','Initial');git('remote','add','origin','https://github.com/jiraya-fixtures/workspace.git');
-    await registration([repo]);
+    await registration([config,repo]);
     await page.getByRole('button', {name:'Refresh projects',exact:true}).click();
     await page.getByText('jiraya-fixtures/workspace', {exact:true}).waitFor();
+    await page.getByText('1 repositories detected by the editor inside this workspace.', {exact:false}).waitFor({state:'attached'});
     await page.getByRole('button',{name:'Enable checkpoint',exact:true}).click();
     await page.getByRole('button',{name:'Disable checkpoint',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Checkpoint all enabled open projects',exact:true}).isEnabled(),true);
+    const second = path.join(config,'second');fs.mkdirSync(second);
+    const gitSecond = (...args) => execFileSync('git',['-C',second,...args],{stdio:'pipe'});
+    gitSecond('init','--initial-branch=main');gitSecond('config','user.name','Pairing Regression');gitSecond('config','user.email','regression@example.test');
+    fs.writeFileSync(path.join(second,'readme.txt'),'second isolated repository');
+    gitSecond('add','.');gitSecond('commit','-m','Initial');gitSecond('remote','add','origin','https://github.com/jiraya-fixtures/second.git');
+    await registration([config,repo,second]);
+    await page.getByRole('button',{name:'Refresh projects',exact:true}).click();
+    await page.getByText('jiraya-fixtures/second',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Enable checkpoint',exact:true}).click();
+    await untilCount(page.getByRole('button',{name:'Disable checkpoint',exact:true}),2);
+    await page.getByText('2 open Git projects · 2 enabled',{exact:true}).waitFor();
+    console.log('PASS: nested Git roots, two independent project cards and both enable controls');
     // Do not click checkpoint: browser tests never send Git traffic to GitHub.
     const closed = await fetch('http://127.0.0.1:8876/workspaces/browser-test-editor',{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
     assert.equal(closed.status,200);
@@ -102,8 +115,20 @@ async function main() {
     assert.equal(await page.getByRole('button',{name:'Checkpoint all enabled open projects',exact:true}).isEnabled(),false);
     console.log('PASS: missing editor, rejected folder details, real Git registration, enable and window closure');
 
+    // A dead companion must not leave stale project/session counts displayed.
+    await registration([repo]);
+    await page.getByRole('button',{name:'Refresh projects',exact:true}).click();
+    await page.getByText('jiraya-fixtures/workspace',{exact:true}).waitFor();
+    await page.route('http://127.0.0.1:8876/**', request=>request.abort());
+    await page.getByRole('button',{name:'Refresh projects',exact:true}).click();
+    await page.getByText('Companion offline',{exact:true}).waitFor();
+    assert.equal(await page.locator('.checkpoint-project').count(),0);
+    assert.equal(await page.locator('.checkpoint-registration').count(),0);
+    console.log('PASS: offline refresh clears stale repository and editor state');
+
   } finally {
     fs.rmSync(route, {recursive:true, force:true});
+    fs.rmSync(path.join(web,'.next','types','app','pairing-regression-harness'), {recursive:true, force:true});
     fs.rmSync(config, {recursive:true, force:true});
     if (browser) await browser.close();
     for (const child of services) {
@@ -114,5 +139,10 @@ async function main() {
       child.stdout.destroy();child.stderr.destroy();child.unref();
     }
   }
+}
+
+async function untilCount(locator, count) {
+  for(let i=0;i<100;i++) {if(await locator.count()===count)return;await new Promise(resolve=>setTimeout(resolve,100));}
+  assert.equal(await locator.count(),count);
 }
 main().catch(error => {console.error(error); process.exitCode = 1;});

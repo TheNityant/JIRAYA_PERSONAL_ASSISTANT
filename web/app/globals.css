@@ -432,37 +432,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 }
 
 .developer-briefing { border: 1px solid var(--border); border-radius: 12px; background: #11161c; margin-bottom: 22px; overflow: hidden; }
-.briefing-mode-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.briefing-demo-page { max-width: 1100px; padding: 35px 24px 70px; margin: 0 auto; }
-.briefing-demo-page nav { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 30px; font-size: 12px; color: var(--muted); }
-.briefing-demo { padding: clamp(18px, 4vw, 42px); border: 1px solid var(--border); border-radius: 16px; background: radial-gradient(ellipse at top right, #183c393d, transparent 65%), #11161c; }
-.developer-briefing > .briefing-demo { margin: 0 18px 18px; }
-.briefing-demo-banner { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 11px; color: var(--muted); }
-.briefing-demo-heading { margin: 35px 0 25px; max-width: 640px; }
-.briefing-demo-heading h2 { font-size: clamp(32px, 5vw, 54px); line-height: 1.1; letter-spacing: -1.8px; font-weight: 500; margin: 15px 0; }
-.briefing-demo-heading p { font-size: 13px; line-height: 1.8; color: var(--muted); }
-.briefing-demo .briefing-search input { width: 100%; padding: 13px 15px; border: 1px solid var(--border); border-radius: 8px; background: #0c1117; color: var(--text); font: inherit; }
-.briefing-demo-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 28px; }
-.briefing-demo-stats > div { display: grid; gap: 8px; padding: 20px 10px; }
-.briefing-demo-stats strong { font-size: clamp(19px, 3vw, 28px); font-weight: 500; }
-.briefing-demo-stats span { font-size: 11px; color: var(--muted); }
-.briefing-demo-projects { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.briefing-demo-projects > label { padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: #151c24; cursor: pointer; min-width: 0; }
-.briefing-demo-projects > label.selected { border-color: #6cafa1; background: #18312e66; }
-.briefing-demo-project-title { display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.briefing-demo-project-title input { width: 16px; height: 16px; flex: none; accent-color: #8ac8b8; margin-top: 2px; }
-.briefing-demo-project-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 10px; color: var(--muted); margin-top: 20px; }
-.briefing-demo-projects p { font-size: 11px; color: #afd6cb; line-height: 1.6; }
-.briefing-demo-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; margin-top: 24px; }
-.briefing-demo-actions > span { color: var(--muted); font-size: 11px; max-width: 300px; line-height: 1.7; }
-.briefing-demo-report { border-top: 1px solid var(--border); margin-top: 32px; padding-top: 22px; }
-.briefing-demo-report-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.briefing-demo-report h3 { font-size: 20px; font-weight: 500; }
-.briefing-demo-report article { padding: 20px 0; border-bottom: 1px solid var(--border); }
-.briefing-demo-report h4 { overflow-wrap: anywhere; font-size: 14px; margin: 10px 0; }
-.briefing-demo-report article p { color: var(--soft); font-size: 13px; line-height: 1.8; }
-.briefing-demo-report article a { font-size: 12px; }
-@media (max-width: 700px) { .briefing-demo-projects { grid-template-columns: 1fr; } .briefing-demo-page nav { flex-wrap: wrap; } .briefing-demo-stats > div { padding: 18px 5px; } }
 .developer-briefing .section-header p { margin: 9px 0 0; color: var(--muted); font-size: 12px; }
 .briefing-body { padding: 0 22px 22px; }
 .briefing-search { display: grid; gap: 9px; color: var(--soft); font-size: 12px; margin: 18px 0 12px; }

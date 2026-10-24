@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.integrations.github.validation import validate_branch
 from app.local_companion.git import (
     GitProblem,
+    NotARepository,
     checkpoint,
     inspect,
     remote,
@@ -80,12 +81,40 @@ class Companion:
                 roots[repo_id(root)] = root
                 folders.append({"path": folder, "root": str(root)})
             except (OSError, GitProblem) as exc:
-                folders.append({"path": folder, "error": str(exc)})
+                row = {"path": folder, "error": str(exc)}
+                if isinstance(exc, NotARepository):
+                    row["reason"] = "not_a_repository"
+                folders.append(row)
+        # VS Code can report both a parent workspace and the nested repositories
+        # its Git integration already has open. This is not a filesystem scan.
+        for row in folders:
+            if row.get("reason") != "not_a_repository":
+                continue
+            parent = Path(row["path"]).expanduser().resolve()
+            nested = [
+                str(root)
+                for root in roots.values()
+                if root != parent and root.is_relative_to(parent)
+            ]
+            if nested:
+                row.pop("error")
+                row["roots"] = nested
+                row["message"] = (
+                    f"{len(nested)} repositories detected by the editor inside this workspace."
+                )
+        known_roots = {**self.open_roots()[0], **roots}
         for folder in body.unsaved_folders:
             try:
                 unsaved.add(repo_id(repository_root(folder)))
             except (OSError, GitProblem):
-                continue
+                # New unsaved documents can live in directories not yet on disk.
+                # Keep their enclosing registered repositories blocked as well.
+                path = Path(folder).expanduser().resolve()
+                unsaved.update(
+                    project_id
+                    for project_id, root in known_roots.items()
+                    if path.is_relative_to(root) or root.is_relative_to(path)
+                )
         with self.guard:
             self.sessions[body.session_id] = {
                 "seen": time.monotonic(),

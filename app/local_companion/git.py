@@ -59,7 +59,9 @@ def git(root: Path, *args: str, check: bool = True) -> str:
 
 def repository_root(folder: str) -> Path:
     root = Path(folder).expanduser().resolve(strict=True)
-    top = git(root, "rev-parse", "--show-toplevel")
+    top = git(root, "rev-parse", "--show-toplevel", check=False)
+    if not top:
+        raise GitProblem("Git could not identify this folder as a repository. Open the repository folder itself and check local Git access.")
     return Path(top).resolve(strict=True)
 
 

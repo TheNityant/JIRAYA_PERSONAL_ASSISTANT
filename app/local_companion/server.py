@@ -73,13 +73,14 @@ class Companion:
         temporary.replace(self.file)
 
     def heartbeat(self, body: WorkspaceHeartbeat):
-        roots, unsaved = {}, set()
+        roots, unsaved, folders = {}, set(), []
         for folder in body.folders:
             try:
                 root = repository_root(folder)
                 roots[repo_id(root)] = root
-            except (OSError, GitProblem):
-                continue  # Non-Git folders are not checkpoint projects.
+                folders.append({"path": folder, "root": str(root)})
+            except (OSError, GitProblem) as exc:
+                folders.append({"path": folder, "error": str(exc)})
         for folder in body.unsaved_folders:
             try:
                 unsaved.add(repo_id(repository_root(folder)))
@@ -90,7 +91,29 @@ class Companion:
                 "seen": time.monotonic(),
                 "roots": roots,
                 "unsaved": unsaved,
+                "folders": folders,
             }
+        return {
+            "registered": True,
+            "folder_count": len(folders),
+            "project_count": len(roots),
+            "issues": [folder for folder in folders if "error" in folder],
+        }
+
+    def registrations(self):
+        """Expose registration failures only through the authenticated local API."""
+        now = time.monotonic()
+        with self.guard:
+            items = [
+                {
+                    "age_seconds": round(max(0, now - session["seen"]), 1),
+                    "project_count": len(session["roots"]),
+                    "folders": session.get("folders", []),
+                }
+                for session in self.sessions.values()
+                if now - session["seen"] < 45
+            ]
+        return {"items": items, "session_count": len(items)}
 
     def open_roots(self):
         with self.guard:
@@ -249,8 +272,11 @@ def create_companion(directory: Path, origins: list[str]) -> FastAPI:
 
     @app.post("/workspaces/heartbeat", dependencies=[Depends(authorize)])
     def heartbeat(body: WorkspaceHeartbeat):
-        state.heartbeat(body)
-        return {"registered": True}
+        return state.heartbeat(body)
+
+    @app.get("/workspaces", dependencies=[Depends(authorize)])
+    def registrations():
+        return state.registrations()
 
     @app.delete("/workspaces/{session_id}", dependencies=[Depends(authorize)])
     def closed(session_id: str):
@@ -260,7 +286,7 @@ def create_companion(directory: Path, origins: list[str]) -> FastAPI:
 
     @app.get("/projects", dependencies=[Depends(authorize)])
     def projects():
-        return {"items": state.projects()}
+        return {"items": state.projects(), "registration": state.registrations()}
 
     @app.put("/projects/{project_id}", dependencies=[Depends(authorize)])
     def configure(project_id: str, body: ProjectPolicy):

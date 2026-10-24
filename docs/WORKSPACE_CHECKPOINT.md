@@ -18,7 +18,7 @@ Keep this terminal running. It prints a pairing token and starts on `127.0.0.1:8
 Install the included VS Code extension from the repository root:
 
 ```powershell
-code --install-extension extensions/jiraya-workspace/jiraya-workspace-0.1.0.vsix
+code --install-extension extensions/jiraya-workspace/jiraya-workspace-0.2.0.vsix --force
 ```
 
 Run **Jiraya: Pair Local Companion** in VS Code's Command Palette and paste the companion token. Open/reload your other project windows. Each trusted local window registers independently; multi-root workspaces are supported. The extension uses VS Code SecretStorage for the token. Remote SSH/WSL/container environments need a companion in that environment; this release targets local desktop folders.
@@ -48,6 +48,21 @@ This release is one-click execution. It does not run automatic timers or shutdow
 The companion never force-pushes, changes your checkout, resolves conflicts or pulls/merges for you. If a push fails after committing, the checkpoint commit remains local. Fix credentials, hooks, branch protection or divergence locally and retry. The retry pushes the existing commit without creating a duplicate empty commit. Authentication must already work in local Git; the cloud GitHub OAuth connection does not install local Git credentials.
 
 Only saved disk contents can be committed. Reported unsaved documents cause that project to be skipped; the last IDE heartbeat is not an instantaneous snapshot of every editor. Save all windows before checkpointing. An open folder containing nested repositories is not recursively scanned: open/register each repository as a workspace folder. Each registered repository needs at least one initial commit.
+
+## Registration diagnostics
+
+After updating, restart the companion, install `jiraya-workspace-0.2.0.vsix`, and run **Developer: Reload Window** in your VS Code project windows. The browser and extension use the same companion token; no `.env` edit is needed.
+
+The extension status bar reports registered Git project counts or an actionable connection error. Click it or run **Jiraya: Show Workspace Diagnostics** to open **Output → Jiraya Workspace** and refresh registration. Diagnostics show the configured port, workspace trust, local folders, registration failures and project branches; they do not print pairing tokens or file contents. A failed replacement token is not saved over working credentials. Token changes automatically refresh other active windows using the same VS Code secret storage.
+
+The browser shows how many editor/terminal sessions are reporting, plus expandable registration details:
+
+- **No sessions:** check the extension is installed and enabled in the intended desktop VS Code profile, open the repository folder, trust it if appropriate, and check the configured companion port.
+- **Sessions but no repositories:** inspect the folder error. A parent directory containing repositories is not scanned recursively; add each repository as a workspace folder.
+- **Repository shown with an error:** check its Git installation/access, initial commit and supported origin. Registration alone does not make it ready to push.
+- **Projects disappear:** keep the editor or `watch` terminal open. Its registration expires after 45 seconds without a heartbeat.
+
+An older companion still works with the extension, but must be updated and restarted to return detailed registration counts. Remote SSH/WSL/container folders remain outside this desktop release.
 
 ## Other local IDEs
 

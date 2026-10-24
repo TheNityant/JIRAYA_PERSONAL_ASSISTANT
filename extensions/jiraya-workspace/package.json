@@ -2,23 +2,57 @@
   "name": "jiraya-workspace",
   "displayName": "Jiraya Workspace Checkpoint",
   "description": "Register open local Git projects with Jiraya and checkpoint enabled repositories together.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "jiraya-local",
   "license": "MIT",
-  "engines": {"vscode": "^1.85.0"},
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./extension.js",
-  "extensionKind": ["workspace"],
-  "activationEvents": ["onStartupFinished"],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
-      {"command": "jiraya.pair", "title": "Jiraya: Pair Local Companion"},
-      {"command": "jiraya.checkpoint", "title": "Jiraya: Checkpoint Enabled Open Projects"}
+      {
+        "command": "jiraya.pair",
+        "title": "Jiraya: Pair Local Companion"
+      },
+      {
+        "command": "jiraya.checkpoint",
+        "title": "Jiraya: Checkpoint Enabled Open Projects"
+      },
+      {
+        "command": "jiraya.diagnose",
+        "title": "Jiraya: Show Workspace Diagnostics"
+      }
     ],
     "configuration": {
       "title": "Jiraya Workspace",
-      "properties": {"jiraya.companionPort": {"type": "number", "default": 8765, "minimum": 1024, "maximum": 65535, "scope": "application", "description": "Local companion port."}}
+      "properties": {
+        "jiraya.companionPort": {
+          "type": "number",
+          "default": 8765,
+          "minimum": 1024,
+          "maximum": 65535,
+          "scope": "application",
+          "description": "Local companion port."
+        }
+      }
     }
   },
-  "capabilities": {"untrustedWorkspaces": {"supported": false}, "virtualWorkspaces": {"supported": false}}
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  }
 }

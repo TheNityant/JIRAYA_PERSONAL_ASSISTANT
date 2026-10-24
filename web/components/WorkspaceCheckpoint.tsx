@@ -1,6 +1,8 @@
 "use client";
 import { type FormEvent, useEffect, useState } from "react";
 
+type Registration = {session_count: number; items: Array<{age_seconds: number; project_count: number; folders: Array<{path: string; root?: string; error?: string}>}>};
+
 type Project = {id: string; path: string; repository?: string; branch?: string; target_branch?: string; files?: string[]; enabled: boolean; unsaved?: boolean; error?: string};
 type Result = {id: string; repository: string; branch: string; status: string; commit?: string; files?: number; detail?: string; remaining_files?: number; remaining_commits?: number};
 type Job = {id: string; status: string; message?: string; results: Result[]};
@@ -12,6 +14,7 @@ export default function WorkspaceCheckpoint() {
   const [paired, setPaired] = useState(false);
   const [online, setOnline] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [registration, setRegistration] = useState<Registration | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [job, setJob] = useState<Job | null>(null);
   const [connectionError, setConnectionError] = useState("");
@@ -42,8 +45,8 @@ export default function WorkspaceCheckpoint() {
     let cancelled = false;
     async function refresh() {
       try {
-        const [rows, latest] = await Promise.all([call<{items: Project[]}>("/projects"), call<Job | null>("/checkpoints/latest")]);
-        if (!cancelled) {setOnline(true);setProjects(rows.items);setJob(latest);setConnectionError("");}
+        const [rows, latest] = await Promise.all([call<{items: Project[]; registration?: Registration}>("/projects"), call<Job | null>("/checkpoints/latest")]);
+        if (!cancelled) {setOnline(true);setProjects(rows.items);setRegistration(rows.registration || null);setJob(latest);setConnectionError("");}
       } catch (e: any) {if (!cancelled) {setOnline(false);setConnectionError(e.message || "Start the local companion to connect.");}}
     }
     refresh(); const timer = window.setInterval(refresh, 5000);
@@ -87,8 +90,13 @@ export default function WorkspaceCheckpoint() {
     {connectionError && paired && <div className="service-alert" role="alert">{connectionError}. Check that the companion is running and browser local-network access is allowed.</div>}
     {error && <div className="service-alert" role="alert">{error}</div>}
     {!paired ? <div className="checkpoint-setup"><div><strong>Connect your local companion once</strong><p>Run <code>python -m app.local_companion serve</code> from your Jiraya installation, pair the VS Code extension, then paste the printed token here. Your local Git credentials stay on this computer.</p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/blob/phase2e-generic-execution/docs/WORKSPACE_CHECKPOINT.md" target="_blank" rel="noreferrer">Setup instructions ↗</a></div><form onSubmit={pair}><label>Pairing token<input name="companionToken" type={showToken ? "text" : "password"} required autoComplete="off" autoCapitalize="none" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)}/></label><label>Local port<input name="companionPort" inputMode="numeric" required value={port} onChange={(e) => setPort(e.target.value)}/></label><label className="checkpoint-token-visibility"><input type="checkbox" checked={showToken} onChange={(e) => setShowToken(e.target.checked)}/>Show pairing token</label><button className="secondary-button" disabled={busy}>Connect companion</button></form></div> : <>
-      <div className="checkpoint-toolbar"><span>{projects.length} open Git projects · {projects.filter((p) => p.enabled).length} enabled</span><div><button className="ghost-button" disabled={busy} onClick={() => setRevision((v) => v+1)}>Refresh projects</button><button className="ghost-button" disabled={busy || running} onClick={() => {localStorage.removeItem("jiraya.companion");setPaired(false);setOnline(false);setProjects([]);setJob(null);}}>Forget pairing</button></div></div>
-      {!projects.length && <p className="checkpoint-note">Open a local Git project in a paired VS Code window. Other IDEs can register folders with the companion’s watch command.</p>}
+      <div className="checkpoint-toolbar"><span>{projects.length} open Git projects · {projects.filter((p) => p.enabled).length} enabled</span><div><button className="ghost-button" disabled={busy} onClick={() => setRevision((v) => v+1)}>Refresh projects</button><button className="ghost-button" disabled={busy || running} onClick={() => {localStorage.removeItem("jiraya.companion");setPaired(false);setOnline(false);setProjects([]);setRegistration(null);setJob(null);}}>Forget pairing</button></div></div>
+      {registration ? <div className="checkpoint-registration" aria-label="Workspace registration">
+        <p className="checkpoint-note">{registration.session_count} registered editor or terminal sessions · registration expires after 45 seconds without a heartbeat.</p>
+        {!registration.session_count && <p className="checkpoint-note">Browser pairing is complete. No editor has registered yet. In VS Code, open your repository folder and run <strong>Jiraya: Show Workspace Diagnostics</strong>. Other IDEs can use the companion’s <code>watch</code> command.</p>}
+        {!!registration.session_count && !projects.length && <p className="checkpoint-note">Your editor is reporting, but no Git repositories were found. Open the repository folder itself; a parent folder containing several projects is not scanned recursively.</p>}
+        {registration.items.some((item) => item.folders.length > 0) && <details><summary>Registration details</summary><ul>{registration.items.flatMap((item, windowIndex) => item.folders.map((folder, index) => <li key={`${windowIndex}-${index}`}><strong>{folder.path}</strong><span> — {folder.error || `Git root: ${folder.root}`}</span></li>))}</ul></details>}
+      </div> : <p className="checkpoint-note">Restart the updated local companion to see registration diagnostics. Open a Git project in a paired VS Code window, or register it with the companion’s watch command.</p>}
       <div className="checkpoint-projects">{projects.map((project) => <article className="checkpoint-project" key={project.id}><div><strong>{project.repository || project.path}</strong><p title={project.path}>{project.path}</p><small>{project.error || `${project.branch} · ${project.files?.length || 0} changed saved files${project.unsaved ? " · Unsaved editor files" : ""}`}</small>{!!project.files?.length && <details><summary>Review changed filenames</summary><ul>{project.files.slice(0,30).map((file) => <li key={file}>{file}</li>)}</ul>{project.files.length > 30 && <small>And {project.files.length-30} more</small>}</details>}</div><div className="checkpoint-policy"><label>Target branch<input aria-label={`Target branch for ${project.repository || project.path}`} value={targets[project.id] ?? project.target_branch ?? project.branch ?? ""} disabled={busy || running || !!project.error || project.enabled} onChange={(e) => setTargets((current) => ({...current, [project.id]: e.target.value}))}/></label><button className={project.enabled ? "secondary-button" : "primary-button"} disabled={busy || running || !online || !!project.error} onClick={() => configure(project, !project.enabled)}>{project.enabled ? "Disable checkpoint" : "Enable checkpoint"}</button></div></article>)}</div>
       <div className="checkpoint-run"><label>Checkpoint commit message<input maxLength={200} value={message} onChange={(e) => setMessage(e.target.value)}/></label><button className="primary-button" onClick={checkpoint} disabled={!online || busy || running || !message.trim() || !projects.some((project) => project.enabled)}>{running ? "Checkpoint running…" : "Checkpoint all enabled open projects"}</button></div>
       <p className="checkpoint-note">Save your files first. Each project must be on its configured branch. Closed projects and reported unsaved buffers are skipped. A failed push keeps the local commit for a later retry.</p>

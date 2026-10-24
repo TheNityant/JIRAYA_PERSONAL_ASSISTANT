@@ -345,3 +345,88 @@ def test_push_is_pinned_to_checkpoint_not_a_concurrent_new_commit(project, monke
     assert run(bare, "rev-parse", "HEAD") == result["commit"]
     assert run(root, "rev-parse", "HEAD") != result["commit"]
     assert result["remaining_commits"] == 1
+
+
+def test_registration_diagnostics_include_rejected_folders_and_expire(project, tmp_path):
+    root, _, _ = project
+    non_git = tmp_path / "parent"
+    non_git.mkdir()
+    child = root / "src"
+    child.mkdir()
+    missing = tmp_path / "missing"
+    app = create_companion(tmp_path / "state", ["http://localhost:3000"])
+    state = app.state.companion
+    headers = {"Authorization": f"Bearer {state.config['token']}"}
+    with TestClient(app) as client:
+        assert client.get("/workspaces").status_code == 401
+        assert (
+            client.get(
+                "/workspaces", headers={**headers, "Origin": "https://evil.test"}
+            ).status_code
+            == 403
+        )
+        response = client.post(
+            "/workspaces/heartbeat",
+            headers=headers,
+            json={
+                "session_id": "window",
+                "folders": [str(root), str(child), str(non_git), str(missing)],
+            },
+        )
+        summary = response.json()
+        assert summary["registered"] is True
+        assert summary["folder_count"] == 4
+        assert summary["project_count"] == 1  # Nested workspace folders deduplicate.
+        assert len(summary["issues"]) == 2
+        assert "repository folder" in summary["issues"][0]["error"]
+        registration = client.get("/workspaces", headers=headers).json()
+        assert registration["session_count"] == 1
+        assert registration["items"][0]["folders"][0]["root"] == str(root)
+        listing = client.get("/projects", headers=headers).json()
+        assert listing["registration"]["session_count"] == 1
+        assert len(listing["items"]) == 1
+        assert state.config["token"] not in client.get("/workspaces", headers=headers).text
+        state.sessions["window"]["seen"] = time.monotonic() - 46
+        assert client.get("/workspaces", headers=headers).json() == {
+            "session_count": 0,
+            "items": [],
+        }
+        assert client.get("/projects", headers=headers).json()["items"] == []
+
+
+def test_api_flow_register_enable_checkpoint_verify_push_and_unregister(project, tmp_path):
+    root, bare, _ = project
+    app = create_companion(tmp_path / "state", ["http://localhost:3000"])
+    state = app.state.companion
+    headers = {
+        "Authorization": f"Bearer {state.config['token']}",
+        "Origin": "http://localhost:3000",
+    }
+    with TestClient(app) as client:
+        response = client.post(
+            "/workspaces/heartbeat",
+            headers=headers,
+            json={"session_id": "ide-window", "folders": [str(root)]},
+        )
+        assert response.json()["project_count"] == 1
+        listing = client.get("/projects", headers=headers).json()
+        project_id = listing["items"][0]["id"]
+        assert listing["items"][0]["enabled"] is False
+        assert (
+            client.put(
+                f"/projects/{project_id}", headers=headers, json={"enabled": True, "branch": "main"}
+            ).status_code
+            == 200
+        )
+        (root / "app.py").write_text("registered through the API\n")
+        result = client.post("/checkpoints", headers=headers, json={"message": "API checkpoint"})
+        assert result.status_code == 202
+        wait(state)
+        job = client.get("/checkpoints/latest", headers=headers).json()
+        assert job["id"] == result.json()["id"]
+        assert job["status"] == "COMPLETE"
+        assert job["results"][0]["status"] == "PUSHED"
+        assert run(bare, "rev-parse", "refs/heads/main") == job["results"][0]["commit"]
+        assert client.delete("/workspaces/ide-window", headers=headers).status_code == 200
+        assert client.get("/workspaces", headers=headers).json()["session_count"] == 0
+        assert client.get("/projects", headers=headers).json()["items"] == []

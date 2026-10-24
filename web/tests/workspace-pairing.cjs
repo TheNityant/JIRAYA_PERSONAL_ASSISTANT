@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {spawn} = require('node:child_process');
+const {spawn, execFileSync} = require('node:child_process');
 const {chromium} = require('playwright');
 
 async function main() {
@@ -73,7 +73,38 @@ async function main() {
     await page.reload();
     await page.getByText('Companion connected', {exact:true}).waitFor();
     console.log('PASS: wrong-token recovery, autofill/state mismatch, whitespace and reload');
+    await page.getByText('No editor has registered yet.', {exact:false}).waitFor();
+    const registration = async folders => {
+      const response = await fetch('http://127.0.0.1:8876/workspaces/heartbeat', {method:'POST',headers:{Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},body:JSON.stringify({session_id:'browser-test-editor',folders})});
+      assert.equal(response.status,200);
+    };
+    await registration([config]); // Existing folder with no .git must produce an explanation.
+    await page.getByRole('button', {name:'Refresh projects',exact:true}).click();
+    await page.getByText('Your editor is reporting, but no Git repositories were found.', {exact:false}).waitFor();
+    await page.getByText('Registration details', {exact:true}).click();
+    await page.getByText('Git could not identify this folder as a repository.', {exact:false}).waitFor();
+    const repo = path.join(config,'repository');fs.mkdirSync(repo);
+    const git = (...args) => execFileSync('git',['-C',repo,...args],{stdio:'pipe'});
+    git('init','--initial-branch=main');git('config','user.name','Pairing Regression');git('config','user.email','regression@example.test');
+    fs.writeFileSync(path.join(repo,'readme.txt'),'isolated browser registration fixture');
+    git('add','.');git('commit','-m','Initial');git('remote','add','origin','https://github.com/jiraya-fixtures/workspace.git');
+    await registration([repo]);
+    await page.getByRole('button', {name:'Refresh projects',exact:true}).click();
+    await page.getByText('jiraya-fixtures/workspace', {exact:true}).waitFor();
+    await page.getByRole('button',{name:'Enable checkpoint',exact:true}).click();
+    await page.getByRole('button',{name:'Disable checkpoint',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Checkpoint all enabled open projects',exact:true}).isEnabled(),true);
+    // Do not click checkpoint: browser tests never send Git traffic to GitHub.
+    const closed = await fetch('http://127.0.0.1:8876/workspaces/browser-test-editor',{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
+    assert.equal(closed.status,200);
+    await page.getByRole('button',{name:'Refresh projects',exact:true}).click();
+    await page.getByText('No editor has registered yet.', {exact:false}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Checkpoint all enabled open projects',exact:true}).isEnabled(),false);
+    console.log('PASS: missing editor, rejected folder details, real Git registration, enable and window closure');
+
   } finally {
+    fs.rmSync(route, {recursive:true, force:true});
+    fs.rmSync(config, {recursive:true, force:true});
     if (browser) await browser.close();
     for (const child of services) {
       try {
@@ -82,8 +113,6 @@ async function main() {
       } catch {}
       child.stdout.destroy();child.stderr.destroy();child.unref();
     }
-    fs.rmSync(route, {recursive:true, force:true});
-    fs.rmSync(config, {recursive:true, force:true});
   }
 }
 main().catch(error => {console.error(error); process.exitCode = 1;});

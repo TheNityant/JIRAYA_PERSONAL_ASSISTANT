@@ -10,6 +10,12 @@ The feature defaults to disabled. Implementing the adapter does not launch a Dig
 
 ## App-owner setup
 
+### Frontend demo without credentials
+
+Open `/demo/hermes` on the Jiraya frontend (for example `http://localhost:3000/demo/hermes`). This standalone page does not require login, a backend, GitHub OAuth or DigitalOcean credentials. Search/select up to three example repositories and generate a simulated briefing. All activity counts, statuses and recommendations are explicitly labeled sample data; this is not live Hermes inference or a repository audit.
+
+The connected GitHub briefing panel also has **Try demo without credentials**, which uses the loaded repository names with illustrative activity. **Live briefing** returns to the existing real integration. No demo selection runs Git commands, sends email or submits a model request.
+
 Use a dedicated Hermes runtime/profile for one pilot user. This version rejects all other Jiraya user IDs; it is not a shared multi-user agent. The profile must have every native toolset disabled. Keep it separate from personal Hermes memory, credentials, cron jobs and unrelated conversations. The adapter checks `GET /v1/toolsets` before reading GitHub data and fails closed unless every returned toolset explicitly has `enabled: false` (an empty list is accepted). Prompt instructions alone do not enforce tool permissions.
 
 1. Follow [DigitalOcean's Hermes guide](https://docs.digitalocean.com/products/managed-agents/agent-harness-runtime/how-to/run-hermes-agent/) to create an isolated test runtime with a model and inference credential. Do not connect GitHub directly to that runtime for this pilot; Jiraya uses its existing connection to supply metadata.

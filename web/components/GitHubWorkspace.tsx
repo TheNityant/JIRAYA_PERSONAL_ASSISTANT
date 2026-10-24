@@ -128,6 +128,7 @@ export default function GitHubWorkspace({onCreateAutomation}: {onCreateAutomatio
   return <div className="service-workspace github-workspace">
     <header className="service-header"><div className="service-title"><span className="service-app-icon github"><ServiceIcon service="github" size={25}/></span><div><span className="eyebrow">Your connected workspace</span><h1>GitHub</h1><p>{service?.connected ? `Connected as ${service.account}` : "Your repositories and the work around them."}</p></div></div><div className="service-header-actions"><button className="secondary-button icon-label" disabled={busy || loading} onClick={() => setRevision((v) => v+1)}><ServiceIcon service="refresh" size={15}/>Refresh</button><button className="primary-button" disabled={!service?.connected || !repository} onClick={() => onCreateAutomation(repository, tab === "pulls" ? "GITHUB_PR_CHANGED" : tab === "runs" ? "GITHUB_WORKFLOW_CHANGED" : "GITHUB_ISSUE_CHANGED")}>Create watcher</button></div></header>
     <WorkspaceCheckpoint/>
+    <p className="checkpoint-note"><a className="service-link" href="/demo/hermes">Preview the repository briefing without Hermes credentials ↗</a></p>
     {error && <div className="service-alert" role="alert">{error}</div>}
     {activityErrors.map((message) => <div key={message} className="service-alert" role="alert">{message}</div>)}
     {feedback && <div className="service-alert success" role="status">{feedback}</div>}

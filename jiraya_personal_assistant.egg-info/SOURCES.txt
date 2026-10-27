@@ -18,6 +18,7 @@ app/automation/github_action.py
 app/automation/matcher.py
 app/automation/obligation_extractor.py
 app/automation/reliable_executor.py
+app/automation/scheduling_reply.py
 app/integrations/__init__.py
 app/integrations/calendar/__init__.py
 app/integrations/calendar/client.py
@@ -43,6 +44,7 @@ app/local_companion/git.py
 app/local_companion/server.py
 app/providers/__init__.py
 app/providers/base.py
+app/providers/hermes.py
 app/providers/nebius.py
 app/reconciler/__init__.py
 app/reconciler/email_reconciler.py
@@ -54,6 +56,7 @@ app/routes/automation_execution.py
 app/routes/automations.py
 app/routes/calendar.py
 app/routes/connections.py
+app/routes/developer_briefing.py
 app/routes/events.py
 app/routes/github.py
 app/routes/gmail.py
@@ -75,6 +78,7 @@ app/services/action_store.py
 app/services/automation_execution_store.py
 app/services/automation_store.py
 app/services/connection_store.py
+app/services/developer_briefing.py
 app/services/event_ledger.py
 app/services/notification_store.py
 app/services/obligation_store.py
@@ -98,8 +102,10 @@ tests/test_automation_matcher.py
 tests/test_automation_routes.py
 tests/test_automation_store.py
 tests/test_calendar_integration.py
+tests/test_companion_startup.py
 tests/test_connection_store.py
 tests/test_connections_routes.py
+tests/test_developer_briefing.py
 tests/test_email_agent.py
 tests/test_email_reconciler.py
 tests/test_event_model.py
@@ -120,6 +126,7 @@ tests/test_phase2_acceptance.py
 tests/test_provider_boundary.py
 tests/test_reconciliation_regressions.py
 tests/test_runtime_regressions.py
+tests/test_scheduling_reply.py
 tests/test_secret_hygiene.py
 tests/test_token_cipher.py
 tests/test_workflow_policy.py

@@ -11,6 +11,7 @@ google-api-python-client<3.0.0,>=2.150.0
 google-auth<3.0.0,>=2.35.0
 google-auth-oauthlib<2.0.0,>=1.2.0
 google-auth-httplib2<1.0.0,>=0.2.0
+tzdata>=2025.2
 
 [dev]
 pytest<9.0.0,>=8.4.0

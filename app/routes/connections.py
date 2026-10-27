@@ -109,6 +109,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
         scope in (active_calendar.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES
     ))
     calendar_health = RuntimeStateStore(db).get(f"oauth-calendar-health:{settings.dev_user_id}") or {}
+    calendar_connected = calendar_connected and calendar_health.get("status") != "RECONNECT_REQUIRED"
     active_github = store.get_active(user_id=settings.dev_user_id, provider="github")
     github_health = RuntimeStateStore(db).get(f"oauth-github-health:{settings.dev_user_id}") or {}
     oauth_health = RuntimeStateStore(db).get(_oauth_state_key(settings.dev_user_id)) or {}
@@ -141,7 +142,7 @@ def list_connections(db: Session = Depends(get_db)) -> dict:
                 "provider": "google_calendar",
                 "label": "Google Calendar",
                 "description": (f"Connection failed: {calendar_health.get('detail')}"
-                    if calendar_health.get("status") == "ERROR" and not calendar_connected
+                    if calendar_health.get("status") in {"ERROR", "RECONNECT_REQUIRED"} and not calendar_connected
                     else "Create events from email and watch calendar changes."),
                 "status": "CONNECTED" if calendar_connected else "AVAILABLE" if settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key else "SETUP_REQUIRED",
                 "account": active_calendar.provider_account_id if calendar_connected else None,

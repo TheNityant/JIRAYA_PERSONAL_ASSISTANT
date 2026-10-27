@@ -203,7 +203,7 @@ def calendar_status(db: Session = Depends(get_db)) -> dict:
         provider="google_calendar",
     )
     health = RuntimeStateStore(db).get(_health_key(settings.dev_user_id)) or {}
-    connected = bool(connection and all(scope in (connection.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES))
+    connected = bool(connection and health.get("status") != "RECONNECT_REQUIRED" and all(scope in (connection.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES))
     return {
         "connected": connected,
         "account": connection.provider_account_id if connected else None,

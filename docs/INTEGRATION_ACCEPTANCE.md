@@ -44,6 +44,7 @@ Use an exact unique marker such as `JIRAYA-LIVE-001` in each test. Start with Dr
 | Gmail + Calendar availability | Enable availability checks on Reply to email; send a future explicit-time request | Draft agrees only when selected calendars are free |
 | Busy-time alternative | Put a conflicting event on a selected calendar; send another marked request | Draft offers free alternatives within configured hours/timezone |
 | No-time request | Send a marked meeting request without dates or times | Draft offers bounded future slots and asks for confirmation |
+| Gmail + Calendar booking | Enable booking on a scheduling reply; send one free proposed time | One verified Calendar event before one verified Gmail reply; busy/no-time requests only suggest alternatives |
 | Gmail → Calendar event | Send explicit future date, start/end and timezone | Reviewable event proposal; after approval, one provider event with matching values |
 | Calendar changed → Notify | Baseline, then edit a marked event | One matching notification; baseline does not replay existing history |
 | GitHub read/action | Choose an accessible test repository; create a test branch without spaces | Branch exists on GitHub with the expected source commit |
@@ -51,7 +52,7 @@ Use an exact unique marker such as `JIRAYA-LIVE-001` in each test. Start with Dr
 | Gmail → GitHub issue | Configure a fixed test repository and marked email rule | Reviewable proposal; after approval, one issue in that repository |
 | Account isolation | Sign into a second test account | First account's connections, automations and executions are inaccessible |
 
-Calendar and GitHub change triggers currently support notifications only. They are not arbitrary multi-step workflow chains. Workflow dispatch is a manual GitHub-tab action and requires a workflow with `workflow_dispatch`. Gmail availability replies do not book a meeting or create a Meet conference. Event creation sends no invitations in this version.
+Calendar and GitHub change triggers currently support notifications only. They are not arbitrary multi-step workflow chains. Workflow dispatch is a manual GitHub-tab action and requires a workflow with `workflow_dispatch`. Gmail availability replies can optionally book one explicitly proposed free time before replying; enable booking per rule. Suggested alternatives are not booked. They do not create a Meet conference. Event creation sends no invitations in this version.
 
 Removing the temporary briefing demo did not remove these executors. Hermes is optional and is not part of their execution path.
 

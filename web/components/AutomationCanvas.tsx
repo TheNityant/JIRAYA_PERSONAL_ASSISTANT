@@ -22,6 +22,7 @@ export default function AutomationCanvas({draft, connections, onSource, onAction
   const action = String(draft.action_config.type || "DRAFT_REPLY");
   const target = actionTarget(action);
   const scheduling = calendarScheduling(draft);
+  const booking = scheduling && (draft.action_config.calendar_scheduling as Record<string, unknown>)?.book_proposed === true;
   const nodes = useMemo<CardNode[]>(() => {
     const cards: CardNode[] = [];
     for (const [i, service] of services.entries()) {
@@ -36,10 +37,10 @@ export default function AutomationCanvas({draft, connections, onSource, onAction
       {id: "target:notify", type: "card", position: {x: 900, y: 555}, data: {label: "Notifications", detail: "Deliver an update inside Jiraya", kicker: "Workspace", service: "notify", role: "destination", active: target === "notify"}},
       {id: "evidence", type: "card", position: {x: 600, y: 500}, data: {label: target === "notify" ? "Notification saved" : "Verify the outcome", detail: target === "notify" ? "Keep a durable record in your workspace" : "Check the provider and record the result", kicker: "Execution evidence", service: "check", role: "evidence"}},
     );
-    if (scheduling) cards.push({id:"availability",type:"card",position:{x:600,y:0},data:{label:"Check Calendar availability",detail:"Check free/busy and working hours; recheck before sending",kicker:"Read-only scheduling context",service:"google_calendar",role:"logic",active:true}});
+    if (scheduling) cards.push({id:"availability",type:"card",position:{x:600,y:0},data:{label:"Check Calendar availability",detail:booking ? "Check free/busy; book and verify one free proposed time before replying. Otherwise suggest alternatives." : "Check free/busy and working hours; recheck before sending",kicker:booking ? "Availability + optional booking" : "Read-only scheduling context",service:"google_calendar",role:"logic",active:true}});
     if (action === "DRAFT_REPLY") cards.push({id: "work", type: "card", position: {x: 300, y: 555}, data: {label: "Track later changes", detail: "Reconcile the email thread and outstanding work", kicker: "After a reply", service: "refresh", role: "work"}});
     return cards.map((card) => ({...card, style: {width: 235}, draggable: true}));
-  }, [draft.source, draft.approval_policy, draft.match_config.semantic_condition, draft.action_config.instructions, action, scheduling, connections]);
+  }, [draft.source, draft.approval_policy, draft.match_config.semantic_condition, draft.action_config.instructions, action, scheduling, booking, connections]);
   const [displayNodes, setNodes, onNodesChange] = useNodesState<CardNode>(nodes);
   useEffect(() => {setNodes((current) => nodes.map((node) => ({...node, position: current.find((n) => n.id === node.id)?.position || node.position})));}, [nodes, setNodes]);
   const edges = useMemo<Edge[]>(() => {

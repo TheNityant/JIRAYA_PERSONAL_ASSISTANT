@@ -216,7 +216,7 @@ export default function AutomationBuilder() {
   function updateAction(key: string, value: unknown) {
     updateDraft((current) => ({
       ...current,
-      action_config: { ...current.action_config, [key]: value, ...(key === "type" && value !== "DRAFT_REPLY" ? {calendar_scheduling: {enabled:false}} : {}) },
+      action_config: { ...current.action_config, [key]: value, ...(key === "type" && value !== "DRAFT_REPLY" ? {calendar_scheduling: {enabled:false}} : {}), ...(key === "type" && value === "CREATE_CALENDAR_EVENT" ? {event_time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone, event_duration_minutes: 30} : {}) },
     }));
   }
 
@@ -300,7 +300,7 @@ export default function AutomationBuilder() {
     }
   }
 
-  async function runLatestEmail(force = false) {
+  async function runLatestEmail(force = false, messageId?: string) {
     if (!selected || isSyncing) return;
     if (selected.source === "github") {
       setIsSyncing(true); setSyncNotice(null);
@@ -324,7 +324,7 @@ export default function AutomationBuilder() {
     }
     setStatus("Debug: running automation on latest Gmail...");
     try {
-      const result = await api.runGmailAutomation(selected.id, undefined, force);
+      const result = await api.runGmailAutomation(selected.id, messageId, force);
       setRunResult(result);
       setExecutionDraft(result.execution?.draft_body ?? "");
       setStatus(`Execution: ${nice(result.decision)}`);
@@ -528,17 +528,19 @@ export default function AutomationBuilder() {
                 </div>
                 {runResult.action_route && <div className="route-note"><strong>{nice(runResult.action_route.decision)}</strong><span>{runResult.action_route.reason}</span></div>}
                 {execution?.action_type === "DRAFT_REPLY" && str(execution.output.reason) && <p className="service-alert" role="alert">{str(execution.output.reason)}</p>}
-                {execution?.action_type === "DRAFT_REPLY" && !executionDraft && runResult.decision === "EXISTING_EXECUTION" && <button className="secondary-button" onClick={() => runLatestEmail(true)}>Regenerate draft</button>}
+                {execution?.action_type === "DRAFT_REPLY" && !executionDraft && !execution.output.calendar_booking && runResult.decision === "EXISTING_EXECUTION" && <button className="secondary-button" onClick={() => runLatestEmail(true, execution.source_event_id)}>Regenerate draft</button>}
                 {execution?.action_type === "DRAFT_REPLY" && executionDraft && (
                   <div className="draft-workspace">
                     <label>Generated reply<textarea rows={8} value={executionDraft} onChange={(event) => setExecutionDraft(event.target.value)} readOnly={execution.status === "VERIFIED_SUCCESS" || Boolean(execution.output.calendar_scheduling)} /></label>
                     <div className="execution-actions">
+                      {Boolean((execution.output.calendar_scheduling as Record<string, unknown> | undefined)?.booking_candidate) && !execution.output.calendar_booking && <span className="execution-note">Sending this reply will first create and verify the proposed event on your primary calendar.</span>}
+                      {Boolean(execution.output.calendar_booking) && <span className="execution-note">Calendar booking: {str((execution.output.calendar_booking as Record<string, unknown>).status)}. Review Calendar and Sent mail before any manual retry.</span>}
                       {Boolean(execution.output.calendar_scheduling) && execution.status !== "VERIFIED_SUCCESS" && <span className="execution-note">Calendar availability is rechecked before sending. Regenerate the reply to change its validated times.</span>}
                       {execution.approval_policy === "DRAFT_ONLY" && <span className="execution-note">Draft-only policy: Jiraya will not send this message.</span>}
                       {execution.status === "BLOCKED_BY_POLICY" && <span className="execution-note warning">External actions are disabled.</span>}
                       {execution.status === "VERIFIED_SUCCESS" && <span className="execution-note success">Sent and verified by Gmail.</span>}
                       {approvable && <button className="primary-button" onClick={approveExecution}>Approve &amp; Send</button>}
-                      {runResult.decision === "EXISTING_EXECUTION" && <button className="secondary-button" onClick={() => runLatestEmail(true)}>Regenerate draft</button>}
+                      {runResult.decision === "EXISTING_EXECUTION" && !execution.output.calendar_booking && <button className="secondary-button" onClick={() => runLatestEmail(true, execution.source_event_id)}>Regenerate draft</button>}
                     </div>
                   </div>
                 )}
@@ -562,9 +564,11 @@ export default function AutomationBuilder() {
                       <p>{when(str((execution.output.proposal as Record<string, unknown>).start))} — {when(str((execution.output.proposal as Record<string, unknown>).end))}</p>
                       <p>{str((execution.output.proposal as Record<string, unknown>).description)}</p>
                     </> : <p>{str(execution.output.reason)}</p>}
+                    {Boolean(execution.output.reason) && Boolean(execution.output.proposal) && <p role="alert">{str(execution.output.reason)}</p>}
                     {approvable && <button className="primary-button" onClick={approveExecution}>Approve &amp; Create event</button>}
                     {execution.status === "VERIFIED_SUCCESS" && <p>Created and verified in Calendar.</p>}
                     {execution.status === "DRAFT_READY" && <p>Draft only: no event will be created.</p>}
+                    {["FALLBACK_NOTIFICATION", "EXECUTION_FAILED"].includes(execution.status) && <button className="secondary-button" onClick={() => runLatestEmail(true, execution.source_event_id)}>Retry this email</button>}
                     {execution.status === "BLOCKED_BY_POLICY" && <p>External actions are disabled.</p>}
                   </div>
                 )}
@@ -603,7 +607,11 @@ export default function AutomationBuilder() {
               <label>New GitHub branch<input value={str(draft.action_config.branch)} onChange={(e) => updateAction("branch", e.target.value)} placeholder="feature/email-follow-up"/></label>
               <label>Source GitHub branch<input value={str(draft.action_config.from_ref) || "main"} onChange={(e) => updateAction("from_ref", e.target.value)}/></label>
             </>}
-            {draft.action_config.type === "CREATE_CALENDAR_EVENT" && <div className="policy-explainer">Provide your timezone and any default event duration in context. Jiraya prepares a dated event from matching emails; unclear times produce a notification. Calendar invitations are not sent.</div>}
+            {draft.action_config.type === "CREATE_CALENDAR_EVENT" && <>
+              <div className="policy-explainer">Creates a dated event from matching emails. Set defaults for emails without a timezone or end time. For availability checks, booking and a reply together, choose Reply to email and enable Calendar-backed scheduling. Calendar invitations are not sent.</div>
+              <label>Default event timezone<input value={str(draft.action_config.event_time_zone)} placeholder="Asia/Kolkata" onChange={e => updateAction("event_time_zone", e.target.value)}/></label>
+              <label>Default event minutes<input type="number" min={15} max={120} value={draft.action_config.event_duration_minutes === undefined ? "" : Number(draft.action_config.event_duration_minutes)} placeholder="30" onChange={e => updateAction("event_duration_minutes", Number(e.target.value))}/></label>
+            </>}
             {draft.source === "gmail" && draft.action_config.type === "DRAFT_REPLY" && <SchedulingSettings value={draft.action_config.calendar_scheduling} connected={isConnected(connections,"google_calendar")} onChange={value => updateAction("calendar_scheduling",value)}/>}
             <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>
             <label>Approval policy<select value={draft.approval_policy} onChange={(e) => updateDraft((current) => ({ ...current, approval_policy: e.target.value as AutomationInput["approval_policy"] }))}><option value="DRAFT_ONLY">Draft only</option><option value="REQUIRED">Ask before action</option><option value="AUTO">Automatic</option></select></label>

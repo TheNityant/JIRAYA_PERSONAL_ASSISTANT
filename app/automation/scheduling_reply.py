@@ -29,6 +29,8 @@ class SchedulingPolicy(BaseModel):
         default_factory=lambda: ["primary"], min_length=1, max_length=10
     )
     assume_timezone: bool = False
+    buffer_minutes: int = Field(default=0, ge=0, le=120)
+    book_proposed: bool = False
 
     @model_validator(mode="after")
     def validate_settings(self):
@@ -57,6 +59,8 @@ class SchedulingPolicy(BaseModel):
             not value.strip() or len(value) > 255 for value in self.calendar_ids
         ):
             raise ValueError("Choose valid calendar IDs")
+        if self.book_proposed and "primary" not in self.calendar_ids:
+            raise ValueError("Include primary among checked calendars when booking meetings")
         return self
 
 
@@ -82,9 +86,10 @@ def policy_for(automation):
 
 
 def busy_periods(calendar, policy, start, end):
+    buffer = timedelta(minutes=policy.buffer_minutes)
     response = calendar.freebusy(
-        time_min=start.isoformat(),
-        time_max=end.isoformat(),
+        time_min=(start - buffer).isoformat(),
+        time_max=(end + buffer).isoformat(),
         calendar_ids=policy.calendar_ids,
         time_zone=policy.time_zone,
     )
@@ -106,7 +111,7 @@ def busy_periods(calendar, policy, start, end):
             parsed = Slot.model_validate(block)
             if parsed.end is None or parsed.end <= parsed.start:
                 raise SchedulingReview("Calendar returned an invalid busy interval.")
-            result.append((parsed.start.astimezone(UTC), parsed.end.astimezone(UTC)))
+            result.append((parsed.start.astimezone(UTC) - buffer, parsed.end.astimezone(UTC) + buffer))
     return result
 
 
@@ -200,15 +205,20 @@ Untrusted email body: {(extract_authored_text(message.body) or message.body)[:80
     available = [(start, end) for start, end in proposed if not overlaps(start, end, busy)]
     proposed_available = bool(available)
     if not available:
+        duration = proposed[0][1] - proposed[0][0] if proposed else timedelta(minutes=policy.duration_minutes)
+        if proposed and any(end - start != duration for start, end in proposed):
+            raise SchedulingReview("Conflicting proposed durations need review before suggesting alternatives.")
         for day in range(policy.horizon_days):
             current = now.astimezone(zone).date() + timedelta(days=day)
+            if proposed and current not in {start.astimezone(zone).date() for start, _ in proposed}:
+                continue
             if intent.kind == "date_only" and current not in intent.dates:
                 continue
             local = datetime.combine(current, time.fromisoformat(policy.work_start), zone)
             close = datetime.combine(current, time.fromisoformat(policy.work_end), zone)
-            while local < close and len(available) < 3:
+            while local < close and (bool(proposed) or len(available) < 3):
                 start = local.astimezone(UTC)
-                end = start + timedelta(minutes=policy.duration_minutes)
+                end = start + duration
                 # Skip wall-clock times that do not exist during a DST transition.
                 valid_clock = start.astimezone(zone).replace(tzinfo=None) == local.replace(
                     tzinfo=None
@@ -220,8 +230,13 @@ Untrusted email body: {(extract_authored_text(message.body) or message.body)[:80
                 ):
                     available.append((start, end))
                 local += timedelta(minutes=max(30, policy.duration_minutes))
-            if len(available) == 3:
+            if not proposed and len(available) == 3:
                 break
+        if proposed:
+            # Prefer later free times on the requested date, then earlier alternatives.
+            anchor = proposed[0][0]
+            available.sort(key=lambda slot: (slot[0] < anchor, abs((slot[0] - anchor).total_seconds())))
+            available = available[:3]
     if not available:
         raise SchedulingReview(
             "No free slots matched your configured calendars, dates and working hours. Review the request."
@@ -252,6 +267,7 @@ Untrusted email body: {(extract_authored_text(message.body) or message.body)[:80
         "slots": [{"start": start.isoformat(), "end": end.isoformat()} for start, end in available],
         "kind": intent.kind,
         "proposed_available": proposed_available,
+        "booking_candidate": available[0][0].isoformat() if policy.book_proposed and proposed_available and len(proposed) == 1 else None,
     }
     return body, evidence
 

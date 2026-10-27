@@ -363,3 +363,156 @@ def test_daylight_saving_skips_nonexistent_local_slots(setup):
     assert all(
         datetime.fromisoformat(row["start"]).astimezone(zone).hour != 2 for row in evidence["slots"]
     )
+
+
+def test_buffer_and_alternatives_stay_near_requested_time(setup):
+    setup.calendar.busy = [{"start": "2026-10-28T14:00:00+05:30", "end": "2026-10-28T15:00:00+05:30"}]
+    body, evidence = prepare(setup, {
+        "kind": "proposed", "timezone_explicit": True,
+        "slots": [{"start": "2026-10-28T14:00:00+05:30"}],
+    }, {"buffer_minutes": 60, "book_proposed": True})
+    assert evidence["booking_candidate"] is None
+    starts = [datetime.fromisoformat(row["start"]).astimezone(scheduling.ZoneInfo("Asia/Kolkata")) for row in evidence["slots"]]
+    assert starts[0].hour == 16
+    assert all(row.date().isoformat() == "2026-10-28" for row in starts)
+    assert "no calendar booking has been made" in body
+
+
+class BookingCalendar(Calendar):
+    def __init__(self):
+        super().__init__()
+        self.events = {}
+        self.inserts = 0
+        self.readback_failure = False
+
+    def get_event(self, *, event_id, **kwargs):
+        from googleapiclient.errors import HttpError
+        if self.readback_failure and self.inserts:
+            raise RuntimeError("Readback unavailable")
+        if event_id not in self.events:
+            raise HttpError(SimpleNamespace(status=404, reason="Not Found"), b"{}")
+        return self.events[event_id]
+
+    def create_event(self, *, event, **kwargs):
+        assert kwargs["calendar_id"] == "primary" and kwargs["send_updates"] == "none"
+        self.inserts += 1
+        self.events[event["id"]] = event
+        return event
+
+
+@pytest.mark.parametrize("policy,external,booked,sent", [
+    ("DRAFT_ONLY", True, 0, 0), ("REQUIRED", True, 0, 0),
+    ("AUTO", False, 0, 0), ("AUTO", True, 1, 1),
+])
+def test_combined_booking_respects_policy_and_verifies_before_send(setup, monkeypatch, policy, external, booked, sent):
+    calendar = BookingCalendar()
+    monkeypatch.setattr(scheduling, "get_calendar_client", lambda *a: calendar)
+    monkeypatch.setattr("app.automation.scheduling_booking.get_calendar_client", lambda *a: calendar)
+    setup.automation.approval_policy = policy
+    setup.automation.action_config["calendar_scheduling"]["book_proposed"] = True
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    original_send = setup.gmail.send_reply
+    def send(**kwargs):
+        assert calendar.inserts == 1
+        assert "I have added this time to my calendar" in kwargs["body_text"]
+        return original_send(**kwargs)
+    setup.gmail.send_reply = send
+    with Session(engine) as db:
+        db.add(setup.automation)
+        db.commit()
+        executor = AutomationExecutor(settings=Settings(enable_external_actions=external), db=db,
+            provider=Provider({"kind": "proposed", "timezone_explicit": True,
+                "slots": [{"start": "2026-10-28T14:00:00+05:30"}]}), gmail=setup.gmail)
+        result = executor.run(automation=setup.automation)
+        assert calendar.inserts == booked and setup.gmail.send_calls == sent
+        if sent:
+            assert result["verification_status"] == "VERIFIED_SUCCESS"
+            assert result["execution"]["output"]["calendar_booking"]["status"] == "VERIFIED_SUCCESS"
+            assert executor.run(automation=setup.automation, force=True)["decision"] == "ALREADY_EXECUTED"
+            assert calendar.inserts == 1 and setup.gmail.send_calls == 1
+        if policy == "REQUIRED":
+            execution = db.get(AutomationExecution, result["execution"]["id"])
+            assert executor.approve(execution=execution)["verification_status"] == "VERIFIED_SUCCESS"
+            assert calendar.inserts == setup.gmail.send_calls == 1
+    engine.dispose()
+
+
+@pytest.mark.parametrize("failure", ["readback", "email"])
+def test_partial_booking_never_sends_false_success_or_rebooks_on_force(setup, monkeypatch, failure):
+    calendar = BookingCalendar()
+    calendar.readback_failure = failure == "readback"
+    monkeypatch.setattr(scheduling, "get_calendar_client", lambda *a: calendar)
+    monkeypatch.setattr("app.automation.scheduling_booking.get_calendar_client", lambda *a: calendar)
+    if failure == "email":
+        setup.gmail.send_reply = lambda **kw: (_ for _ in ()).throw(RuntimeError("Transport unavailable"))
+    setup.automation.approval_policy = "AUTO"
+    setup.automation.action_config["calendar_scheduling"]["book_proposed"] = True
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(setup.automation)
+        db.commit()
+        executor = AutomationExecutor(settings=Settings(enable_external_actions=True), db=db,
+            provider=Provider({"kind": "proposed", "timezone_explicit": True,
+                "slots": [{"start": "2026-10-28T14:00:00+05:30"}]}), gmail=setup.gmail)
+        result = executor.run(automation=setup.automation)
+        assert result["execution"]["status"] in {"EXECUTION_FAILED", "FALLBACK_NOTIFICATION"}
+        assert result["execution"]["output"]["calendar_booking"]["status"] == ("PENDING" if failure == "readback" else "VERIFIED_SUCCESS")
+        assert calendar.inserts == 1 and setup.gmail.send_calls == 0
+        assert executor.run(automation=setup.automation, force=True)["decision"] == "EXISTING_EXECUTION"
+        assert calendar.inserts == 1
+    engine.dispose()
+
+
+@pytest.mark.parametrize("intent,busy", [
+    ({"kind": "no_time"}, []),
+    ({"kind": "date_only", "dates": ["2026-10-28"]}, []),
+    ({"kind": "proposed", "timezone_explicit": True, "slots": [{"start": "2026-10-28T14:00:00+05:30"}]}, [{"start": "2026-10-28T14:00:00+05:30", "end": "2026-10-28T15:00:00+05:30"}]),
+    ({"kind": "proposed", "timezone_explicit": True, "slots": [{"start": "2026-10-28T14:00:00+05:30"}, {"start": "2026-10-28T16:00:00+05:30"}]}, []),
+])
+def test_combined_mode_does_not_book_unconfirmed_alternatives(setup, monkeypatch, intent, busy):
+    calendar = BookingCalendar()
+    calendar.busy = busy
+    monkeypatch.setattr(scheduling, "get_calendar_client", lambda *a: calendar)
+    monkeypatch.setattr("app.automation.scheduling_booking.get_calendar_client", lambda *a: calendar)
+    setup.automation.approval_policy = "AUTO"
+    setup.automation.action_config["calendar_scheduling"]["book_proposed"] = True
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(setup.automation)
+        db.commit()
+        executor = AutomationExecutor(settings=Settings(enable_external_actions=True), db=db, provider=Provider(intent), gmail=setup.gmail)
+        result = executor.run(automation=setup.automation)
+        assert result["verification_status"] == "VERIFIED_SUCCESS"
+        assert calendar.inserts == 0 and setup.gmail.send_calls == 1
+        assert "no calendar booking has been made" in setup.gmail.messages["sent-1"].body
+    engine.dispose()
+
+
+def test_booking_approval_rechecks_new_conflict_before_insert(setup, monkeypatch):
+    calendar = BookingCalendar()
+    monkeypatch.setattr(scheduling, "get_calendar_client", lambda *a: calendar)
+    monkeypatch.setattr("app.automation.scheduling_booking.get_calendar_client", lambda *a: calendar)
+    setup.automation.action_config["calendar_scheduling"]["book_proposed"] = True
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(setup.automation)
+        db.commit()
+        executor = AutomationExecutor(settings=Settings(enable_external_actions=True), db=db,
+            provider=Provider({"kind": "proposed", "timezone_explicit": True, "slots": [{"start": "2026-10-28T14:00:00+05:30"}]}), gmail=setup.gmail)
+        result = executor.run(automation=setup.automation)
+        execution = db.get(AutomationExecution, result["execution"]["id"])
+        calendar.busy = execution.output["calendar_scheduling"]["slots"]
+        assert executor.approve(execution=execution)["decision"] == "FALLBACK_NOTIFICATION"
+        assert calendar.inserts == 0 and setup.gmail.send_calls == 0
+    engine.dispose()
+
+
+def test_busy_alternatives_preserve_explicit_meeting_duration(setup):
+    setup.calendar.busy = [{"start": "2026-10-28T14:00:00+05:30", "end": "2026-10-28T15:00:00+05:30"}]
+    _, evidence = prepare(setup, {"kind": "proposed", "timezone_explicit": True,
+        "slots": [{"start": "2026-10-28T14:00:00+05:30", "end": "2026-10-28T15:30:00+05:30"}]})
+    assert all((datetime.fromisoformat(row["end"]) - datetime.fromisoformat(row["start"])).total_seconds() == 90 * 60 for row in evidence["slots"])

@@ -30,7 +30,10 @@ export default function Page(){
   await page.getByLabel('Default meeting minutes',{exact:true}).fill('45');
   await page.getByLabel('Scheduling calendar IDs',{exact:true}).fill('primary, work@example.test');
   assert.equal(await page.getByRole('checkbox',{name:'Use my scheduling timezone when the email omits one',exact:true}).isChecked(),false);
-  const saved=JSON.parse(await page.getByLabel('Saved scheduling settings').textContent());assert.equal(saved.enabled,true);assert.equal(saved.duration_minutes,45);assert.equal(saved.work_start,'10:00');assert.deepEqual(saved.calendar_ids,['primary','work@example.test']);
+  await page.getByLabel('Meeting buffer minutes',{exact:true}).fill('60');
+  await page.getByRole('checkbox',{name:'Book one explicitly proposed free time, then reply',exact:true}).check();
+  await page.getByText('Availability + optional booking',{exact:true}).waitFor();
+  const saved=JSON.parse(await page.getByLabel('Saved scheduling settings').textContent());assert.equal(saved.enabled,true);assert.equal(saved.buffer_minutes,60);assert.equal(saved.book_proposed,true);assert.equal(saved.duration_minutes,45);assert.equal(saved.work_start,'10:00');assert.deepEqual(saved.calendar_ids,['primary','work@example.test']);
   await page.getByText('Check Calendar availability',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Toggle Calendar connection',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Save fixture',exact:true}).isDisabled(),true);
   await toggle.uncheck();assert.equal(await page.getByRole('button',{name:'Save fixture',exact:true}).isEnabled(),true);

@@ -97,7 +97,7 @@ class AutomationExecutor:
                 "match": match_payload,
                 "execution": self.execution_payload(existing),
             }
-        if existing is not None and not force:
+        if existing is not None and (not force or (existing.output or {}).get("calendar_booking")):
             return {
                 "decision": "EXISTING_EXECUTION",
                 "automation_id": automation.id,
@@ -254,6 +254,7 @@ class AutomationExecutor:
         scheduling_config = (automation.action_config or {}).get("calendar_scheduling")
         if isinstance(scheduling_config, dict) and scheduling_config.get("enabled"):
             from app.automation.scheduling_reply import SchedulingReview, prepare_reply
+            from app.integrations.calendar.errors import calendar_failure
 
             try:
                 draft_body, scheduling = prepare_reply(
@@ -267,7 +268,7 @@ class AutomationExecutor:
                 reason = (
                     str(exc)
                     if isinstance(exc, SchedulingReview)
-                    else "Calendar scheduling could not be verified. Check the connection, timing and scheduling settings."
+                    else calendar_failure(exc)[1]
                 )
                 execution = self.executions.create(
                     automation_id=automation.id,
@@ -446,17 +447,22 @@ class AutomationExecutor:
         scheduling = (execution.output or {}).get("calendar_scheduling")
         if scheduling:
             from app.automation.scheduling_reply import SchedulingReview, policy_for, recheck
+            from app.integrations.calendar.errors import calendar_failure
 
             try:
                 current = policy_for(automation) if automation else None
                 if current is None or current.model_dump() != scheduling["policy"]:
                     raise SchedulingReview("Scheduling settings changed. Regenerate the reply.")
-                recheck(scheduling, self.db, self.settings)
+                if scheduling.get("booking_candidate"):
+                    from app.automation.scheduling_booking import book_before_reply
+                    execution = book_before_reply(self, execution, message, scheduling)
+                else:
+                    recheck(scheduling, self.db, self.settings)
             except Exception as exc:
                 reason = (
                     str(exc)
                     if isinstance(exc, SchedulingReview)
-                    else "Could not recheck calendar availability. Regenerate the scheduling reply after checking Calendar."
+                    else calendar_failure(exc)[1]
                 )
                 execution = self.executions.update(
                     execution,
@@ -498,7 +504,7 @@ class AutomationExecutor:
                     message=message,
                     execution=execution,
                     title=f"Reply failed: {automation.name}",
-                    text="Jiraya could not send the configured reply. Review the connection and try again.",
+                    text=("Calendar was booked, but the email reply failed or is unverified. Check the event and Sent folder before retrying." if (execution.output or {}).get("calendar_booking") else "Jiraya could not send the configured reply. Review the connection and try again."),
                     dedupe_key=f"send-failed:{execution.id}",
                 )
             return {"decision": "EXECUTION_FAILED", "execution": self.execution_payload(execution)}

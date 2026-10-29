@@ -66,3 +66,9 @@ Fixtures do not establish success against your live Google account. Capture the 
 `python -m pytest tests/test_scheduling_reply.py tests/test_companion_startup.py -q` covers scheduling policies, Calendar failures, timing boundaries, automatic/draft/approval paths, rechecking, duplicate sends and companion socket startup. From `web`, `node tests/scheduling-settings.cjs` tests frontend preferences and the Calendar context node using Playwright/Chromium without provider calls.
 
 [Google Calendar free/busy reference](https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query) defines busy intervals with inclusive starts and exclusive ends.
+
+### Event extraction defaults and diagnostics
+
+Standalone Calendar event extraction now applies saved timezone and duration defaults in Python after the model extracts the date/start. A local ISO start plus `end: null` is sufficient when both explicit defaults exist. Explicit offsets and end times from the email retain precedence. Missing dates, missing start times, ambiguous clock-change times and missing defaults still stop creation. The exact support context wording beginning `My timezone is Asia/Kolkata` and specifying a `default duration of 30 minutes` is recognized for existing rules; structured event timezone/minutes fields remain preferred.
+
+Calendar JSON extraction uses a bounded 1024-token response; ordinary model calls retain their 256-token budget. Truncated responses are rejected. The execution panel distinguishes model-service failure, invalid JSON, invalid event fields, invalid defaults and missing event details, and shows which defaults were loaded. No raw model response or provider error payload is exposed. Updating instructions alone cannot repair a provider or model-output error; retry after updating/restarting and inspect the new diagnostic.

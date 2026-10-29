@@ -391,3 +391,58 @@ def test_transient_refresh_failure_does_not_invalidate_calendar_authorization(db
     with pytest.raises(RefreshError):
         get_calendar_client(db, settings)
     assert RuntimeStateStore(db).get(f"oauth-calendar-health:{settings.dev_user_id}") is None
+
+
+@pytest.mark.parametrize("context,config", [
+    ("", {"event_time_zone": "Asia/Kolkata", "event_duration_minutes": 30}),
+    ("My timezone is Asia/Kolkata (UTC+05:30). Use this timezone when a meeting email omits one. If the email gives a start time but no end time or duration, use a default duration of 30 minutes.", {}),
+])
+def test_calendar_applies_saved_defaults_to_local_time_and_missing_end(db, monkeypatch, context, config):
+    partial = {"summary": "NEBIUS meeting", "description": "Feature progress", "start": "2026-10-30T15:00:00", "end": None}
+    run, calendar = executor(db, monkeypatch, provider=Provider(partial))
+    rule = automation(db, "AUTO")
+    rule.action_config = {"type": "CREATE_CALENDAR_EVENT", **config}
+    rule.context_config = {"instructions": context}
+    db.commit()
+    result = run.run(automation=rule)
+    assert result["verification_status"] == "VERIFIED_SUCCESS"
+    event = next(iter(calendar.events.values()))
+    assert event["start"]["dateTime"] == "2026-10-30T15:00:00+05:30"
+    assert event["end"]["dateTime"] == "2026-10-30T15:30:00+05:30"
+    assert result["execution"]["output"]["event_defaults"] == {"time_zone": "Asia/Kolkata", "duration_minutes": 30}
+
+
+def test_missing_timezone_defaults_are_not_guessed(db, monkeypatch):
+    run, calendar = executor(db, monkeypatch, provider=Provider({**PROPOSAL, "start": "2026-10-30T15:00:00", "end": None}))
+    rule = automation(db, "AUTO")
+    rule.context_config = {}
+    result = run.run(automation=rule)
+    assert result["decision"] == "FALLBACK_NOTIFICATION"
+    assert "Default event timezone" in result["execution"]["output"]["reason"]
+    assert calendar.inserts == 0
+
+
+@pytest.mark.parametrize("failure,code", [("request", "EVENT_MODEL_UNAVAILABLE"), ("json", "EVENT_MODEL_INVALID_JSON"), ("fields", "EVENT_MODEL_INVALID_FIELDS")])
+def test_extraction_failure_diagnostics_distinguish_model_and_event_errors(db, monkeypatch, failure, code):
+    class Broken(Provider):
+        def complete(self, prompt, **kw):
+            if "action-safety router" in prompt:
+                return super().complete(prompt, **kw)
+            if failure == "request":
+                raise RuntimeError("provider secret body never expose")
+            return '{"summary":' if failure == "json" else json.dumps({**PROPOSAL, "unexpected": "secret"})
+    run, calendar = executor(db, monkeypatch, provider=Broken())
+    result = run.run(automation=automation(db, "AUTO"))
+    output = result["execution"]["output"]
+    assert output["reason_code"] == code
+    assert "secret" not in str(output)
+    assert calendar.inserts == 0
+
+
+def test_explicit_email_times_take_precedence_over_defaults(db, monkeypatch):
+    run, calendar = executor(db, monkeypatch)
+    rule = automation(db, "AUTO")
+    rule.action_config = {**rule.action_config, "event_time_zone": "America/New_York", "event_duration_minutes": 60}
+    result = run.run(automation=rule)
+    assert result["verification_status"] == "VERIFIED_SUCCESS"
+    assert next(iter(calendar.events.values()))["end"]["dateTime"] == PROPOSAL["end"]

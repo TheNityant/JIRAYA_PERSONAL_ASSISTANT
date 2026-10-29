@@ -559,6 +559,8 @@ export default function AutomationBuilder() {
                 {execution?.action_type === "CREATE_CALENDAR_EVENT" && (
                   <div className="draft-workspace">
                     <strong>Proposed Calendar event</strong>
+                    {Boolean(execution.output.stage) && <p className="form-note">Stopped at {str(execution.output.stage)} · {str(execution.output.reason_code)}</p>}
+                    {Boolean(execution.output.event_defaults) && <p className="form-note">Saved defaults: {str((execution.output.event_defaults as Record<string, unknown>).time_zone) || "timezone not set"} · {String((execution.output.event_defaults as Record<string, unknown>).duration_minutes ?? "duration not set")} minutes</p>}
                     {execution.output.proposal ? <>
                       <p><strong>{str((execution.output.proposal as Record<string, unknown>).summary)}</strong></p>
                       <p>{when(str((execution.output.proposal as Record<string, unknown>).start))} — {when(str((execution.output.proposal as Record<string, unknown>).end))}</p>

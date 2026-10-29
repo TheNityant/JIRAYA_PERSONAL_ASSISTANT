@@ -28,6 +28,12 @@ class NebiusProvider(ModelProvider):
         return self._model
 
     def complete(self, message: str, *, enable_thinking: bool = True) -> str:
+        return self._complete(message, enable_thinking=enable_thinking, max_tokens=256)
+
+    def complete_json(self, message: str) -> str:
+        return self._complete(message, enable_thinking=False, max_tokens=1024)
+
+    def _complete(self, message: str, *, enable_thinking: bool, max_tokens: int) -> str:
         completion = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -38,13 +44,15 @@ class NebiusProvider(ModelProvider):
                 {"role": "user", "content": message},
             ],
             temperature=0,
-            max_tokens=256,
+            max_tokens=max_tokens,
             extra_body={
                 "chat_template_kwargs": {
                     "enable_thinking": enable_thinking,
                 }
             },
         )
+        if completion.choices[0].finish_reason == "length":
+            raise RuntimeError("Model response exceeded the output limit; retry extraction.")
         content = completion.choices[0].message.content
         if not content:
             raise RuntimeError("Nebius returned an empty completion.")

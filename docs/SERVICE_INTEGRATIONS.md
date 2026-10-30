@@ -2,6 +2,8 @@
 
 This document covers the non-Gmail integrations currently implemented on `phase2e-generic-execution`.
 
+For a live-account validation sequence, local repository diagnostics and the first hosted pilot, see [Integration acceptance](INTEGRATION_ACCEPTANCE.md). This plan distinguishes implemented routes from future Meet work and does not claim live-account tests have already passed.
+
 ## Google Calendar
 
 Jiraya keeps Calendar credentials in a separate `google_calendar` connection so Calendar can be tested independently from the Gmail connection.
@@ -110,9 +112,10 @@ the Google Cloud setup above.
 | Trigger source | Action | Behavior |
 | --- | --- | --- |
 | Gmail · New email | Create calendar event | Match email, extract a dated proposal, apply approval policy, create and read back the event |
+| Gmail · New email | Reply with Calendar scheduling | Check availability; optionally book one clear proposed free slot before sending a verified reply. See [scheduling setup](SCHEDULING_REPLIES.md) |
 | Calendar · Event changed | Notify me | Incrementally sync primary-calendar changes and notify on matching events |
 
-For email-to-event automations, put your timezone and any default duration into Personal
+For email-to-event automations, set the default event timezone and minutes fields or put those defaults into Personal
 context (for example, `Use Asia/Kolkata. Default meeting duration: 30 minutes.`). Action
 instructions define which event to create. A clear date, start and end are required;
 missing or ambiguous scheduling information produces a notification rather than an

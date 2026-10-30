@@ -36,6 +36,17 @@ class GitHubClient:
     def get_branch_ref(self, *, owner: str, repo: str, branch: str) -> dict:
         return self._request("GET", f"/repos/{owner}/{repo}/git/ref/heads/{quote(branch, safe='')}")
 
+    def list_branches(self, *, owner: str, repo: str) -> list[dict]:
+        items = []
+        page = 1
+        while True:
+            batch = self._request("GET", f"/repos/{owner}/{repo}/branches",
+                params={"per_page": 100, "page": page}) or []
+            items.extend(batch)
+            if len(batch) < 100:
+                return items
+            page += 1
+
     def list_pulls(self, *, owner: str, repo: str, limit: int = 100) -> list[dict]:
         return self._request("GET", f"/repos/{owner}/{repo}/pulls",
             params={"state": "all", "sort": "updated", "direction": "desc", "per_page": limit}) or []

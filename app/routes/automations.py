@@ -103,6 +103,17 @@ def _validate_logic(values: dict) -> None:
     source = values["source"]
     trigger = values["trigger_type"]
     action = (values.get("action_config") or {}).get("type", "DRAFT_REPLY")
+    scheduling = (values.get("action_config") or {}).get("calendar_scheduling") or {}
+    if not isinstance(scheduling, dict):
+        raise HTTPException(422, "Calendar scheduling must be an object")
+    if scheduling.get("enabled"):
+        from app.automation.scheduling_reply import SchedulingPolicy
+        try:
+            SchedulingPolicy.model_validate(scheduling)
+        except ValueError as exc:
+            raise HTTPException(422, "Use valid scheduling timezone, working hours, weekdays, duration and calendars") from exc
+        if source != "gmail" or action != "DRAFT_REPLY":
+            raise HTTPException(422, "Calendar-backed scheduling is available only for Gmail replies")
     allowed = {("gmail", "NEW_EMAIL"), ("google_calendar", "CALENDAR_CHANGED"),
                ("github", "GITHUB_ISSUE_CHANGED"), ("github", "GITHUB_PR_CHANGED"),
                ("github", "GITHUB_WORKFLOW_CHANGED")}
@@ -110,6 +121,17 @@ def _validate_logic(values: dict) -> None:
         raise HTTPException(status_code=422, detail="Trigger does not belong to the selected source")
     if action not in {"DRAFT_REPLY", "NOTIFY", "CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
         raise HTTPException(status_code=422, detail="Unsupported action")
+    if action == "CREATE_CALENDAR_EVENT":
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        config = values.get("action_config") or {}
+        try:
+            if config.get("event_time_zone"):
+                ZoneInfo(config["event_time_zone"])
+            duration = config.get("event_duration_minutes")
+            if duration is not None and (type(duration) is not int or not 15 <= duration <= 120):
+                raise ValueError("Invalid duration")
+        except (ValueError, TypeError, ZoneInfoNotFoundError) as exc:
+            raise HTTPException(422, "Use a valid event timezone and duration from 15 to 120 minutes") from exc
     if source == "github" and action != "NOTIFY":
         raise HTTPException(status_code=422, detail="GitHub change triggers support Notify me")
     if source == "github" or action in {"CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:

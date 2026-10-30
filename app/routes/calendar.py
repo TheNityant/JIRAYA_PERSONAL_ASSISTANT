@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -203,7 +203,7 @@ def calendar_status(db: Session = Depends(get_db)) -> dict:
         provider="google_calendar",
     )
     health = RuntimeStateStore(db).get(_health_key(settings.dev_user_id)) or {}
-    connected = bool(connection and all(scope in (connection.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES))
+    connected = bool(connection and health.get("status") != "RECONNECT_REQUIRED" and all(scope in (connection.scopes or []) for scope in GOOGLE_CALENDAR_SCOPES))
     return {
         "connected": connected,
         "account": connection.provider_account_id if connected else None,
@@ -225,17 +225,25 @@ def list_calendar_events(
     db: Session = Depends(get_db),
 ) -> dict:
     settings = get_settings()
-    start = time_min or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        start_dt = datetime.fromisoformat(time_min) if time_min else datetime.now(UTC)
+        end_dt = datetime.fromisoformat(time_max) if time_max else start_dt + timedelta(days=30)
+        if start_dt.tzinfo is None or end_dt.tzinfo is None or end_dt <= start_dt:
+            raise ValueError("Use timezone-aware dates with an end after the start")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Provide a valid date window with timezone offsets and an end after the start") from exc
+    start, end = start_dt.isoformat(), end_dt.isoformat()
     try:
         items = get_calendar_client(db, settings).list_events(
             calendar_id=calendar_id,
             time_min=start,
-            time_max=time_max,
+            time_max=end,
             max_results=limit,
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Calendar unavailable: {type(exc).__name__}: {exc}") from exc
-    return {"calendar_id": calendar_id, "items": items}
+    return {"calendar_id": calendar_id, "items": items, "time_min": start, "time_max": end, "limit": limit,
+            "limit_reached": len(items) >= limit}
 
 
 @router.post("/calendar/freebusy")

@@ -49,6 +49,9 @@ Configured action type:
 Configured action instructions:
 {str((automation.action_config or {}).get('instructions') or '')}
 
+User-configured structured action settings:
+{json.dumps({key: value for key, value in (automation.action_config or {}).items() if key != "instructions"}, ensure_ascii=False)}
+
 Personal/context instructions:
 {str((automation.context_config or {}).get('instructions') or '')}
 
@@ -60,6 +63,8 @@ newly_authored_body={body[:8000]}
 Rules:
 - AUTO_ACT when this is clearly the routine situation described by the semantic condition AND the configured action instructions fully cover the response.
 - A request that is exactly what the automation was created to handle is NOT, by itself, a reason to stop automatic execution.
+- Structured action settings are user authorization too: event timezone/duration defaults cover omitted values, and enabled calendar_scheduling authorizes checking availability. book_proposed authorizes booking one clearly proposed free slot before replying. The executor will validate timing and query Calendar; unavailable Calendar data must not be guessed here.
+- CREATE_CALENDAR_EVENT itself authorizes extracting an event from a matching meeting email; additional free-text action instructions are not mandatory when the email plus configured defaults are sufficient.
 - NOTIFY_ONLY when the message introduces material facts, changed requirements, complaints, failures, rejection, missing/incorrect work, disputes, sensitive changes, unsupported requests, or ambiguity that the configured action does not safely cover.
 - A broad topical match (for example 'submission') does NOT authorize a generic auto-reply to every message on that topic.
 - If uncertain, choose NOTIFY_ONLY. Never ask for approval here: the user already chose Automatic. The safe fallback for Automatic is notification, not silently changing policy.

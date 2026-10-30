@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from app.automation.matcher import AutomationMatcher
 from app.integrations.github.connection import get_github_client
+from app.integrations.github.errors import github_error
 from app.integrations.github.validation import repository_parts
 from app.providers.nebius import NebiusProvider
 from app.services.automation_execution_store import AutomationExecutionStore
@@ -30,14 +31,16 @@ class GitHubRuntimeService:
                 "decision": "NOT_CONNECTED" if not connection else "NO_AUTOMATIONS",
                 "processed": 0,
             }
-        processed, errors, cache = 0, [], {}
+        processed, baselines, errors, cache = 0, 0, [], {}
         client = get_github_client(self.db, self.settings)
         try:
             for rule in rules:
+                stage, repository = "configuration", ""
                 try:
                     repository = str((rule.action_config or {}).get("repository") or "")
                     owner, repo = repository_parts(repository)
                     cache_key = (repository, rule.trigger_type)
+                    stage = "github_read"
                     if cache_key not in cache:
                         if rule.trigger_type == "GITHUB_WORKFLOW_CHANGED":
                             items = client.list_workflow_runs(owner=owner, repo=repo, limit=100)
@@ -53,6 +56,7 @@ class GitHubRuntimeService:
                             ]
                         cache[cache_key] = items
                     items = cache[cache_key]
+                    stage = "match_and_notify"
                     identity = hashlib.sha256(
                         json.dumps(
                             [
@@ -65,8 +69,11 @@ class GitHubRuntimeService:
                             sort_keys=True,
                         ).encode()
                     ).hexdigest()
-                    key = f"github-snapshot:{identity}"
+                    # Version the hash schema so upgrading does not replay historical items.
+                    key = f"github-snapshot:v2:{identity}"
                     previous = self.state.get(key)
+                    if previous is None:
+                        baselines += 1
                     versions = dict((previous or {}).get("versions") or {})
                     current = {}
                     for item in items:
@@ -86,8 +93,12 @@ class GitHubRuntimeService:
                                 "updated_at",
                                 "run_attempt",
                                 "head_sha",
+                                "merged_at",
+                                "closed_at",
+                                "draft",
                             ]
                         }
+                        payload["pull_head_sha"] = (item.get("head") or {}).get("sha")
                         version = hashlib.sha256(
                             json.dumps(payload, sort_keys=True).encode()
                         ).hexdigest()
@@ -101,12 +112,19 @@ class GitHubRuntimeService:
                     self.state.set(key, {"versions": dict(list(merged.items())[-1000:])})
                 except Exception as exc:
                     self.db.rollback()
-                    errors.append({"automation_id": rule.id, "error_type": type(exc).__name__})
+                    if stage in {"configuration", "github_read"}:
+                        status, detail = github_error(exc)
+                    else:
+                        status, detail = 503, "Could not evaluate this watcher or save its notification. Check its semantic condition and model configuration, then retry."
+                    errors.append({"automation_id": rule.id, "repository": repository,
+                        "trigger_type": rule.trigger_type, "stage": stage,
+                        "error_type": type(exc).__name__, "status_code": status, "detail": detail})
         finally:
             client.close()
         return {
             "decision": "PARTIAL_ERROR" if errors else "POLL_COMPLETE",
             "processed": processed,
+            "baselines_initialized": baselines,
             "errors": errors,
         }
 

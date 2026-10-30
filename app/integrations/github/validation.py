@@ -11,6 +11,8 @@ def repository_parts(value: str) -> tuple[str, str]:
 
 
 def validate_branch(value: str) -> str:
+    if re.search(r"\s", value):
+        raise ValueError("Branch names cannot contain spaces. Use hyphens, for example feature/follow-up")
     if (
         not value
         or value == "@"

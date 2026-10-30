@@ -62,7 +62,11 @@ class AutomationExecutor:
                 "trigger_type": automation.trigger_type,
             }
 
-        message = self.gmail.get_message(message_id) if message_id else self.gmail.get_latest_unread_inbox()
+        message = (
+            self.gmail.get_message(message_id)
+            if message_id
+            else self.gmail.get_latest_unread_inbox()
+        )
         if message is None:
             return {"decision": "NO_MESSAGE", "automation_id": automation.id}
 
@@ -93,7 +97,7 @@ class AutomationExecutor:
                 "match": match_payload,
                 "execution": self.execution_payload(existing),
             }
-        if existing is not None and not force:
+        if existing is not None and (not force or (existing.output or {}).get("calendar_booking")):
             return {
                 "decision": "EXISTING_EXECUTION",
                 "automation_id": automation.id,
@@ -164,13 +168,21 @@ class AutomationExecutor:
 
         if action_type in {"CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
             from app.automation.github_action import GitHubAction
-            return GitHubAction(self).prepare(automation=automation, message=message,
-                match=match_payload, correlation_id=correlation_id)
+
+            return GitHubAction(self).prepare(
+                automation=automation,
+                message=message,
+                match=match_payload,
+                correlation_id=correlation_id,
+            )
 
         if action_type == "CREATE_CALENDAR_EVENT":
             from app.automation.calendar_action import CalendarEventAction
+
             return CalendarEventAction(self).prepare(
-                automation=automation, message=message, match=match_payload,
+                automation=automation,
+                message=message,
+                match=match_payload,
                 correlation_id=correlation_id,
             )
 
@@ -238,7 +250,51 @@ class AutomationExecutor:
             if route_payload["decision"] == "REQUIRE_APPROVAL":
                 effective_policy = "REQUIRED"
 
-        draft_body = self.generator.generate(automation=automation, message=message)
+        scheduling = None
+        scheduling_config = (automation.action_config or {}).get("calendar_scheduling")
+        if isinstance(scheduling_config, dict) and scheduling_config.get("enabled"):
+            from app.automation.scheduling_reply import SchedulingReview, prepare_reply
+            from app.integrations.calendar.errors import calendar_failure
+
+            try:
+                draft_body, scheduling = prepare_reply(
+                    automation=automation,
+                    message=message,
+                    provider=self.provider,
+                    db=self.db,
+                    settings=self.settings,
+                )
+            except Exception as exc:
+                reason = (
+                    str(exc)
+                    if isinstance(exc, SchedulingReview)
+                    else calendar_failure(exc)[1]
+                )
+                execution = self.executions.create(
+                    automation_id=automation.id,
+                    correlation_id=correlation_id,
+                    source_event_id=message.id,
+                    source_thread_id=message.thread_id,
+                    action_type=action_type,
+                    approval_policy=effective_policy,
+                    status="FALLBACK_NOTIFICATION",
+                    match_result=match_payload,
+                    output={"reason": reason},
+                )
+                self._notify_action_required(
+                    automation=automation,
+                    message=message,
+                    execution=execution,
+                    title=f"Scheduling needs review: {automation.name}",
+                    text=reason,
+                    dedupe_key=f"scheduling-review:{execution.id}",
+                )
+                return {
+                    "decision": "FALLBACK_NOTIFICATION",
+                    "execution": self.execution_payload(execution),
+                }
+        else:
+            draft_body = self.generator.generate(automation=automation, message=message)
         if effective_policy == "DRAFT_ONLY":
             status = "DRAFT_READY"
         elif effective_policy == "REQUIRED":
@@ -267,6 +323,7 @@ class AutomationExecutor:
                 "subject": message.subject,
                 "configured_approval_policy": automation.approval_policy,
                 "action_route": route_payload,
+                **({"calendar_scheduling": scheduling} if scheduling else {}),
             },
         )
         self.ledger.append(
@@ -345,9 +402,11 @@ class AutomationExecutor:
     def approve(self, *, execution: AutomationExecution, edited_draft: str | None = None) -> dict:
         if execution.action_type in {"CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
             from app.automation.github_action import GitHubAction
+
             return GitHubAction(self).approve(execution)
         if execution.action_type == "CREATE_CALENDAR_EVENT":
             from app.automation.calendar_action import CalendarEventAction
+
             return CalendarEventAction(self).approve(execution)
         if execution.action_type != "DRAFT_REPLY":
             return {"decision": "NOT_APPROVABLE", "execution": self.execution_payload(execution)}
@@ -368,6 +427,14 @@ class AutomationExecutor:
             edited = edited_draft.strip()
             if not edited:
                 return {"decision": "EMPTY_DRAFT", "execution": self.execution_payload(execution)}
+            if (execution.output or {}).get(
+                "calendar_scheduling"
+            ) and edited != execution.draft_body.strip():
+                return {
+                    "decision": "SCHEDULING_REGENERATION_REQUIRED",
+                    "reason": "Regenerate a scheduling reply instead of editing its validated times.",
+                    "execution": self.execution_payload(execution),
+                }
             execution = self.executions.update(execution, draft_body=edited)
 
         message = self.gmail.get_message(execution.source_event_id)
@@ -377,6 +444,44 @@ class AutomationExecutor:
         recipient = message.reply_to or message.sender
         entity_id = f"gmail:{message.id}"
         automation = self.db.get(Automation, execution.automation_id)
+        scheduling = (execution.output or {}).get("calendar_scheduling")
+        if scheduling:
+            from app.automation.scheduling_reply import SchedulingReview, policy_for, recheck
+            from app.integrations.calendar.errors import calendar_failure
+
+            try:
+                current = policy_for(automation) if automation else None
+                if current is None or current.model_dump() != scheduling["policy"]:
+                    raise SchedulingReview("Scheduling settings changed. Regenerate the reply.")
+                if scheduling.get("booking_candidate"):
+                    from app.automation.scheduling_booking import book_before_reply
+                    execution = book_before_reply(self, execution, message, scheduling)
+                else:
+                    recheck(scheduling, self.db, self.settings)
+            except Exception as exc:
+                reason = (
+                    str(exc)
+                    if isinstance(exc, SchedulingReview)
+                    else calendar_failure(exc)[1]
+                )
+                execution = self.executions.update(
+                    execution,
+                    status="FALLBACK_NOTIFICATION",
+                    output={**(execution.output or {}), "reason": reason},
+                )
+                if automation:
+                    self._notify_action_required(
+                        automation=automation,
+                        message=message,
+                        execution=execution,
+                        title=f"Scheduling needs review: {automation.name}",
+                        text=reason,
+                        dedupe_key=f"scheduling-stale:{execution.id}",
+                    )
+                return {
+                    "decision": "FALLBACK_NOTIFICATION",
+                    "execution": self.execution_payload(execution),
+                }
         try:
             sent = self.gmail.send_reply(source=message, body_text=execution.draft_body)
         except Exception as exc:
@@ -399,7 +504,7 @@ class AutomationExecutor:
                     message=message,
                     execution=execution,
                     title=f"Reply failed: {automation.name}",
-                    text="Jiraya could not send the configured reply. Review the connection and try again.",
+                    text=("Calendar was booked, but the email reply failed or is unverified. Check the event and Sent folder before retrying." if (execution.output or {}).get("calendar_booking") else "Jiraya could not send the configured reply. Review the connection and try again."),
                     dedupe_key=f"send-failed:{execution.id}",
                 )
             return {"decision": "EXECUTION_FAILED", "execution": self.execution_payload(execution)}
@@ -437,7 +542,9 @@ class AutomationExecutor:
             recipient=recipient,
             status=verification.status,
             executed_at=sent_event.occurred_at,
-            verified_at=verified_event.occurred_at if verification.status == "VERIFIED_SUCCESS" else None,
+            verified_at=verified_event.occurred_at
+            if verification.status == "VERIFIED_SUCCESS"
+            else None,
             verification_evidence=verification.evidence,
         )
         execution = self.executions.update(
@@ -486,7 +593,8 @@ class AutomationExecutor:
                         category="ACTION_REQUIRED",
                         severity="WARNING",
                         title=obligation.title,
-                        message=obligation.description or "This email created work that remains outstanding.",
+                        message=obligation.description
+                        or "This email created work that remains outstanding.",
                         source="obligation",
                         source_entity_id=entity_id,
                         automation_id=automation.id if automation else None,

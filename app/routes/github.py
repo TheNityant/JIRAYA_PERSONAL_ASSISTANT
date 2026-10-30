@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.integrations.github.client import GitHubClient
+from app.integrations.github.errors import github_error
 from app.integrations.github.connection import get_github_client
 from app.integrations.github.validation import validate_branch
 from app.integrations.github.oauth import (
@@ -210,16 +212,48 @@ def github_issues(
 
 @router.get("/github/repos/{owner}/{repo}/pulls")
 def github_pulls(owner: str, repo: str, db: Session = Depends(get_db)) -> dict:
+    client = None
     try:
-        return {"items": get_github_client(db, get_settings()).list_pulls(owner=owner, repo=repo)}
+        client = get_github_client(db, get_settings())
+        return {"items": client.list_pulls(owner=owner, repo=repo)}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"GitHub unavailable: {type(exc).__name__}") from exc
+        status, detail = github_error(exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
+    finally:
+        if client is not None:
+            client.close()
+
+
+@router.get("/github/repos/{owner}/{repo}/branches")
+def github_branches(owner: str, repo: str, db: Session = Depends(get_db)) -> dict:
+    client = None
+    try:
+        client = get_github_client(db, get_settings())
+        return {"items": client.list_branches(owner=owner, repo=repo)}
+    except Exception as exc:
+        status, detail = github_error(exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
+    finally:
+        if client is not None:
+            client.close()
 
 
 @router.post("/runtime/github/poll")
 def poll_github(db: Session = Depends(get_db)) -> dict:
     from app.runtime.github_runtime import GitHubRuntimeService
-    return GitHubRuntimeService(db=db, settings=get_settings()).poll()
+    try:
+        settings = get_settings()
+        result = GitHubRuntimeService(db=db, settings=settings).poll()
+        errors = result.get("errors") or []
+        RuntimeStateStore(db).set(f"github-monitor-health:{settings.dev_user_id}", {
+            "last_poll_at": datetime.now(UTC).isoformat(),
+            "last_status": "ERROR" if errors else "OK", "last_decision": result["decision"],
+            "last_error": "; ".join(error["detail"] for error in errors)[:1000] if errors else None,
+        })
+        return result
+    except Exception as exc:
+        status, detail = github_error(exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
 
 
 class GitHubIssueRequest(BaseModel):
@@ -275,15 +309,24 @@ def create_github_branch(
     db: Session = Depends(get_db),
 ) -> dict:
     _require_external_actions()
+    client = None
+    operation = "source_branch"
     try:
-        return get_github_client(db, get_settings()).create_branch(
-            owner=owner,
-            repo=repo,
-            new_branch=request.new_branch,
-            from_ref=request.from_ref,
-        )
+        client = get_github_client(db, get_settings())
+        source = client.get_branch_ref(owner=owner, repo=repo, branch=request.from_ref)
+        sha = str((source.get("object") or {}).get("sha") or "")
+        if not sha:
+            raise HTTPException(status_code=502, detail="GitHub returned no commit for the source branch. Refresh branches and try again.")
+        operation = "create_branch"
+        return client.create_branch_at_sha(owner=owner, repo=repo, branch=request.new_branch, sha=sha)
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"GitHub action failed: {type(exc).__name__}: {exc}") from exc
+        status, detail = github_error(exc, operation=operation)
+        raise HTTPException(status_code=status, detail=detail) from exc
+    finally:
+        if client is not None:
+            client.close()
 
 
 @router.post("/github/repos/{owner}/{repo}/workflow-dispatch", status_code=202)

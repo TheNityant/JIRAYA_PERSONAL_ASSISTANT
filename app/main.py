@@ -13,6 +13,7 @@ from app.routes import (
     automations,
     calendar,
     connections,
+    developer_briefing,
     events,
     github,
     gmail,
@@ -75,6 +76,7 @@ app.include_router(gmail.router)
 app.include_router(gmail_runtime.router)
 app.include_router(calendar.router)
 app.include_router(github.router)
+app.include_router(developer_briefing.router)
 app.include_router(reconciliation.router)
 app.include_router(automations.router)
 app.include_router(automation_execution.router)

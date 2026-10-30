@@ -292,14 +292,21 @@ class GmailRuntimeService:
                 self._notify_reconciliation(action_id=action.id, result=follow_up_reconciliation)
 
             # A tracked reply thread still feeds independent actions such as Calendar.
-            # Keep the existing reply reconciliator in charge of email responses.
+            # Scheduling replies must also process new proposals in an existing thread.
             independent_results = []
+            scheduling_claimed = False
             if "SENT" not in message.labels:
                 for automation in self.automations.list(source="gmail", enabled=True):
                     action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
-                    if action_type in {"CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
-                        independent_results.append({"automation_id": automation.id,
-                            "result": self.executor.run(automation=automation, message_id=message.id)})
+                    scheduling_config = (automation.action_config or {}).get("calendar_scheduling") or {}
+                    scheduling_reply = action_type == "DRAFT_REPLY" and isinstance(scheduling_config, dict) and scheduling_config.get("enabled")
+                    if scheduling_reply and scheduling_claimed:
+                        continue
+                    if scheduling_reply or action_type in {"CREATE_CALENDAR_EVENT", "CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"}:
+                        result = self.executor.run(automation=automation, message_id=message.id)
+                        independent_results.append({"automation_id": automation.id, "result": result})
+                        if scheduling_reply and result.get("decision") not in {"NO_MATCH", "AUTOMATION_DISABLED", "UNSUPPORTED_TRIGGER"}:
+                            scheduling_claimed = True
             return {
                 "message_id": message.id,
                 "thread_id": message.thread_id,

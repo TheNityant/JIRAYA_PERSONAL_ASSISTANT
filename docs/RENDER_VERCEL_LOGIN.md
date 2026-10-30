@@ -13,7 +13,9 @@ JIRAYA_BACKEND_URL=https://YOUR-BACKEND.onrender.com
 NEXT_PUBLIC_JIRAYA_API_URL=/api/jiraya
 ```
 
-The first is a server configuration value read when Next builds its routing configuration. The second is the client API base. `/api/jiraya/*` is forwarded to the configured backend; auth responses/cookies return through the frontend's origin. Existing direct API configurations and local development remain supported when proxy settings are absent. The proxy destination must be a trusted HTTPS origin, with HTTP loopback permitted for local tests. Never put provider secrets in NEXT_PUBLIC variables.
+The first is a server-only destination read by the explicit Next route handler at `web/app/api/jiraya/[...path]/route.ts`. The second is the client API base, embedded during the frontend build. `/api/jiraya/*` is forwarded to the configured backend; auth responses/cookies return through the frontend's origin. Existing direct API configurations and local development remain supported. The proxy destination must be a trusted HTTPS origin, with HTTP loopback permitted for local tests. Never put provider secrets in NEXT_PUBLIC variables.
+
+The proxy is a deployed server function, not an optional rewrite. Build output must include the dynamic route `ƒ /api/jiraya/[...path]`. `web/vercel.json` pins the Next.js framework, `npm run build` and `.next` output so a dashboard static-output override cannot silently omit the API function. Keep Root Directory **web**. Remove any custom static export. Do not deploy the `.next/static` folder as the whole application.
 
 On **Render**, set:
 
@@ -37,10 +39,12 @@ This does not change the database, encryption key, provider credentials, account
 
 Use the stable configured frontend URL, not an unconfigured Vercel preview URL. Sign in once. In browser Network tools, POST /api/jiraya/auth/login should return 200 and GET /api/jiraya/auth/me should return the signed-in user. Refresh the page and confirm the user persists, then test a provider connection through its updated callback. Sign out and confirm /auth/me returns a null user. Do not share Cookie/Set-Cookie headers or OAuth callback codes in screenshots.
 
+Before signing in, open `/api/jiraya/health`. It should return JSON with `status: "ok"` and the response header `X-Jiraya-Proxy: route-v1`. A JSON **503** naming `JIRAYA_BACKEND_URL` means the route is deployed but its destination is missing/invalid; a JSON **502** means the route cannot reach its backend. An HTML **404** without the proxy marker means this new route did not handle the request: inspect the deployment's source commit, build output and domain assignment. If the marker is present, inspect the configured backend destination and its response instead. Re-entering OAuth credentials cannot fix routing. Environment changes require a new deployment; redeploying an older commit cannot add a route introduced by a newer commit.
+
 A successful local proxy test establishes routing and cookie round trips in Next, not a verified live Vercel deployment. Inspect production request/response behavior if it differs.
 
 ## Regression checks
 
-`node web/tests/api-proxy-config.cjs` checks routing configuration and rejected proxy destinations. With Playwright/Chromium available, `node web/tests/auth-proxy.cjs` exercises AccountGate, cookie forwarding, refresh, an OAuth-style callback, logout, invalid passwords and accepted-but-missing sessions through a real Next server with an isolated backend fixture. Set `AUTH_PROXY_PRODUCTION=1` to build and test `next start` instead of dev mode. The HTTP fixture uses a non-Secure cookie; real production cookies remain Secure/HttpOnly through the unchanged backend session code.
+`node web/tests/api-proxy-config.cjs` checks trusted destinations. With Playwright/Chromium available, `node web/tests/auth-proxy.cjs` exercises AccountGate, health, write verbs/query/body forwarding, backend error statuses, multiple cookies, refresh, all three OAuth callback paths, logout, invalid passwords and accepted-but-missing sessions through a real Next server with an isolated backend fixture. Set `AUTH_PROXY_PRODUCTION=1` to build and test `next start` instead of dev mode. After a build, `node web/tests/proxy-status.cjs` verifies JSON diagnostics for missing configuration, self-routing and an unreachable backend. The HTTP fixture uses a non-Secure cookie; real production cookies remain Secure/HttpOnly through the unchanged backend session code.
 
-Reference: [Next external rewrites](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites).
+Reference: [Next backend-for-frontend route handlers](https://nextjs.org/docs/app/guides/backend-for-frontend).

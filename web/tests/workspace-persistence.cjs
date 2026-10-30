@@ -50,19 +50,12 @@ async function main(){
   browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
   await page.goto(frontend);await page.getByRole('button',{name:/Saved email to Calendar/}).click();
-  await page.getByRole('button',{name:'Debug · Run latest',exact:true}).waitFor();
-  await page.getByLabel('Background Gmail monitoring').filter({hasText:'Last completed check:'}).waitFor();
+  assert.equal(await page.getByRole('region',{name:'Automation testing and execution'}).count(),0);
   await page.getByText('Fixture: missing meeting start time',{exact:true}).waitFor();
   if(process.env.JIRAYA_UI_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_UI_SCREENSHOT});
   await page.getByRole('button',{name:'Retry this email',exact:true}).click();
   await page.getByRole('button',{name:'Approve & Create event',exact:true}).waitFor();
   assert.deepEqual(calls.at(-1).body,{message_id:'prior-email',force:true});
-  await page.getByRole('button',{name:'Choose inbox email',exact:true}).click();
-  await page.getByRole('combobox',{name:'Debug source email'}).selectOption('chosen-email');
-  await page.getByRole('button',{name:'Debug · Test match',exact:true}).click();await page.getByText('Fixture match',{exact:false}).waitFor();
-  await page.getByRole('button',{name:'Debug · Run selected email',exact:true}).click();
-  await page.getByRole('button',{name:'Approve & Create event',exact:true}).waitFor();assert.deepEqual(calls.at(-1).body,{message_id:'chosen-email',force:false});
-  assert.equal(await page.getByRole('link',{name:'Meeting / source link ↗',exact:true}).getAttribute('href'),'https://meet.google.com/abc-defg-hij');
   await page.reload();await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor();await page.getByRole('button',{name:'Approve & Create event',exact:true}).waitFor();
   disconnected=true;await page.reload();await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor(); // Saved rules survive connector attention.
   disconnected=false;
@@ -76,7 +69,7 @@ async function main(){
   await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor();await page.getByRole('button',{name:'GitHub',exact:true}).click();
   await panel.getByText('2 open Git projects · 2 enabled',{exact:true}).waitFor();assert.equal(claims,1);
   user.id='another-user';await page.reload();await page.getByRole('button',{name:'GitHub',exact:true}).click();await panel.getByRole('button',{name:'Connect with VS Code',exact:true}).waitFor();assert.equal(claims,1);
-  await context.close();console.log('PASS: visible debug, saved failure, exact-email retry/preview/run, approval, refresh, disconnected-account access, handoff, two repositories and pairing retained across logout/login and isolated from another account');
+  await context.close();console.log('PASS: test block removed, saved failure, exact-email retry, approval, refresh, disconnected-account access, handoff, two repositories and pairing retained across logout/login and isolated from another account');
  }finally{
   if(browser)await browser.close();if(server){try{process.kill(-server.pid,'SIGTERM');}catch{}server.stdout.destroy();server.stderr.destroy();server.unref();}
   for(const service of [backend,companion]){service.closeAllConnections();await new Promise(resolve=>service.close(resolve));}

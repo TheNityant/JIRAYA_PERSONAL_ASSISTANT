@@ -546,23 +546,6 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
               </div>
             </header>
 
-            <section className="automation-debug" aria-label="Automation testing and execution">
-              <div><strong>Test and execution</strong><p>{!selected ? "Save this automation to enable testing." : isDirty ? "Save your changes first. Tests use the saved configuration." : "Preview a match, run an email, or reopen an execution saved by the background monitor."}</p></div>
-              {draft.source === "gmail" && <>
-                <p aria-label="Background Gmail monitoring">{runtime?.background_monitor_enabled ? `Automatic monitoring is active. Checks run every ${runtime.poll_seconds}s, with processing time in addition.` : runtime?.background_monitor_configured ? "Automatic monitoring needs attention. Check the Runtime status and connection." : "Automatic monitoring is paused. Debug runs do not enable it."}{runtime?.last_poll_at ? ` Last completed check: ${when(runtime.last_poll_at)}.` : ""}{selected && !selected.enabled ? " This automation is disabled." : ""}</p>
-                <p>Saved changes apply to new emails. To test an email already received, choose it below.</p>
-                <div className="debug-controls">
-                  <label>Source email<select aria-label="Debug source email" value={debugMessageId} onChange={event => {setDebugMessageId(event.target.value);setPreview(null);setRunResult(null);setExecutionDraft("");}}><option value="">Newest inbox email</option>{debugMessageId && !inbox.some(item => item.id === debugMessageId) && <option value={debugMessageId}>{preview?.message?.subject || `Message ${debugMessageId}`}</option>}{inbox.map(item => <option key={item.id} value={item.id}>{item.subject} · {item.sender}</option>)}</select></label>
-                  <button className="secondary-button" disabled={!selected || debugBusy} onClick={async () => {try {setInbox((await api.recentInbox()).items);setDebugError("");} catch (error: any) {setDebugError(error.message);}}}>Choose inbox email</button>
-                  <button className="secondary-button" disabled={!selected || isDirty || debugBusy} onClick={testLatestEmail}>Debug · Test match</button>
-                  <button className="primary-button" disabled={!selected || isDirty || debugBusy} onClick={() => runLatestEmail(false)}>{debugBusy ? "Testing…" : debugMessageId ? "Debug · Run selected email" : "Debug · Run latest"}</button>
-                </div>
-                <p>Run follows the saved approval policy. Automatic can write immediately; Ask before action waits for approval.</p>
-              </>}
-              {!!history.length && <label>Saved executions<select aria-label="Saved executions" value={runResult?.execution?.id || ""} onChange={event => {const row = history.find(item => item.id === event.target.value);if (row) {setRunResult({decision: row.status, execution: row});setExecutionDraft(row.draft_body);}}}><option value="" disabled>Select an execution</option>{history.map(row => <option key={row.id} value={row.id}>{nice(row.status)} · {when(row.created_at)} · {row.source_event_id}</option>)}</select></label>}
-              {debugError && <p role="alert" className="service-alert">{debugError}</p>}
-            </section>
-
             {syncNotice && <div className={`sync-notice ${syncNotice.error ? "error" : ""}`} role={syncNotice.error ? "alert" : "status"}>{syncNotice.message}</div>}
             <AutomationCanvas draft={draft} connections={connections} onSource={selectSource} onAction={(action) => updateAction("type", action)}/>
 

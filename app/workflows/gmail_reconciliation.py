@@ -65,6 +65,10 @@ class GmailReconciliationWorkflow:
                 reason=f"Gmail thread could not be observed: {type(exc).__name__}",
             )
 
+        thread_messages = [
+            item for item in thread_messages if item.thread_id == action.external_thread_id
+        ]
+
         user_email = self._infer_user_email(action, thread_messages)
 
         # A Phase-2A reconciliation may already have returned requires_follow_up=True
@@ -77,17 +81,28 @@ class GmailReconciliationWorkflow:
                 action=action,
             )
 
+        pending_incoming = [
+            item
+            for item in self._later_incoming_messages(action, thread_messages, user_email=user_email)
+            if self.obligations.for_action_trigger(
+                action_id=action.id, trigger_message_id=item.id
+            ) is None
+        ]
+
         # A later user-authored SENT message is only a resolution candidate. Direction is
         # determined from both Gmail's SENT label and the mailbox address inferred from the
         # verified action. This prevents a manually-authored reply from ever being treated
         # as a new incoming request merely because a provider omitted/mangled labels.
         if open_obligation and open_obligation.status == "OPEN":
-            resolution_message = self._latest_sent_after_obligation(
+            resolution_message = self._next_sent_after_obligation(
                 open_obligation,
                 thread_messages,
                 user_email=user_email,
             )
-            if resolution_message:
+            if resolution_message and (
+                not pending_incoming
+                or self._message_order(resolution_message) < self._message_order(pending_incoming[0])
+            ):
                 return self._evaluate_sent_resolution_candidate(
                     reconciliation_id=reconciliation_id,
                     action=action,
@@ -95,12 +110,7 @@ class GmailReconciliationWorkflow:
                     message=resolution_message,
                 )
 
-        later_messages = self._later_incoming_messages(
-            action,
-            thread_messages,
-            user_email=user_email,
-        )
-        if not later_messages:
+        if not pending_incoming:
             return {
                 "correlation_id": reconciliation_id,
                 "action_id": action.id,
@@ -110,28 +120,18 @@ class GmailReconciliationWorkflow:
                 "obligation": self._obligation_payload(open_obligation),
             }
 
-        latest = later_messages[-1]
-        previous = action.last_reconciliation or {}
-        if previous.get("message_id") == latest.id:
-            return {
-                "correlation_id": reconciliation_id,
-                "action_id": action.id,
-                "decision": "NO_NEW_EVENT",
-                "initial_status": action.initial_status,
-                "current_status": action.current_status,
-                "last_reconciliation": previous,
-                "obligation": self._obligation_payload(open_obligation),
-            }
-
+        # Process the next unseen message, not only the newest message in a thread.
+        # Otherwise a quick "thanks" can hide an earlier request between monitor polls.
+        later_message = pending_incoming[0]
         observed_payload = {
             "action_id": action.id,
             "original_correlation_id": action.correlation_id,
             "thread_id": action.external_thread_id,
-            "message_id": latest.id,
-            "from": latest.sender,
-            "subject": latest.subject,
-            "internal_date_ms": latest.internal_date_ms,
-            "body_preview": latest.body[:2000],
+            "message_id": later_message.id,
+            "from": later_message.sender,
+            "subject": later_message.subject,
+            "internal_date_ms": later_message.internal_date_ms,
+            "body_preview": later_message.body[:2000],
         }
         self.ledger.append(
             source="gmail",
@@ -141,22 +141,22 @@ class GmailReconciliationWorkflow:
             payload=observed_payload,
         )
 
-        decision = self.reconciler.reconcile(action=action, later_message=latest)
-        observed_at = datetime.fromtimestamp(latest.internal_date_ms / 1000, tz=timezone.utc)
+        decision = self.reconciler.reconcile(action=action, later_message=later_message)
+        observed_at = datetime.fromtimestamp(later_message.internal_date_ms / 1000, tz=timezone.utc)
         evidence = {
-            "thread_id": latest.thread_id,
-            "message_id": latest.id,
-            "sender": latest.sender,
-            "subject": latest.subject,
-            "body_preview": latest.body[:2000],
-            "internal_date_ms": latest.internal_date_ms,
+            "thread_id": later_message.thread_id,
+            "message_id": later_message.id,
+            "sender": later_message.sender,
+            "subject": later_message.subject,
+            "body_preview": later_message.body[:2000],
+            "internal_date_ms": later_message.internal_date_ms,
         }
         action = self.actions.apply_reconciliation(
             action=action,
             classification=decision.classification,
             reason=decision.reason,
             requires_follow_up=decision.requires_follow_up,
-            message_id=latest.id,
+            message_id=later_message.id,
             observed_at=observed_at,
             evidence=evidence,
         )
@@ -187,8 +187,8 @@ class GmailReconciliationWorkflow:
                 action=action,
                 classification=decision.classification,
                 reason=decision.reason,
-                message_id=latest.id,
-                message_internal_date_ms=latest.internal_date_ms,
+                message_id=later_message.id,
+                message_internal_date_ms=later_message.internal_date_ms,
                 evidence=evidence,
             )
             self.ledger.append(
@@ -201,7 +201,7 @@ class GmailReconciliationWorkflow:
                     "action_id": action.id,
                     "status": obligation.status,
                     "classification": decision.classification,
-                    "trigger_message_id": latest.id,
+                    "trigger_message_id": later_message.id,
                     "description": decision.reason,
                 },
             )
@@ -403,10 +403,24 @@ class GmailReconciliationWorkflow:
             and message.id not in {source_id, sent_id}
             and not cls._is_user_sent(message, user_email=user_email)
         ]
-        return sorted(later, key=lambda item: item.internal_date_ms)
+        later = sorted(later, key=cls._message_order)
+        previous = action.last_reconciliation or {}
+        checkpoint_id = previous.get("message_id")
+        for index, item in enumerate(later):
+            if item.id == checkpoint_id:
+                return later[index + 1 :]
+        checkpoint_ms = int((previous.get("evidence") or {}).get("internal_date_ms") or 0)
+        if checkpoint_ms:
+            checkpoint = (checkpoint_ms, str(checkpoint_id or ""))
+            return [item for item in later if cls._message_order(item) > checkpoint]
+        return later
+
+    @staticmethod
+    def _message_order(message):
+        return message.internal_date_ms, message.id
 
     @classmethod
-    def _latest_sent_after_obligation(
+    def _next_sent_after_obligation(
         cls,
         obligation: Obligation,
         messages: list,
@@ -423,20 +437,23 @@ class GmailReconciliationWorkflow:
 
         if candidate and candidate_version < OBLIGATION_RESOLVER_VERSION:
             checkpoint_ms = trigger_ms
+            checkpoint_id = ""
         else:
             checkpoint_ms = int(
                 context.get("last_resolution_candidate_internal_date_ms") or trigger_ms
             )
+            checkpoint_id = str(context.get("last_resolution_candidate_id") or "")
 
         later_sent = [
             message
             for message in messages
-            if message.internal_date_ms > checkpoint_ms
+            if message.internal_date_ms > trigger_ms
+            and cls._message_order(message) > (checkpoint_ms, checkpoint_id)
             and cls._is_user_sent(message, user_email=user_email)
         ]
         if not later_sent:
             return None
-        return max(later_sent, key=lambda item: item.internal_date_ms)
+        return min(later_sent, key=cls._message_order)
 
     @staticmethod
     def _infer_user_email(action: Action, messages: list) -> str | None:

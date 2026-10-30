@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.integrations.gmail.connection import get_gmail_client
 from app.runtime.gmail_runtime import GmailRuntimeService
+from app.runtime.status import monitor_status
 from app.services.connection_store import ConnectionStore
 from app.services.runtime_state_store import RuntimeStateStore
 
@@ -20,14 +21,15 @@ def gmail_runtime_status(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
     state_store = RuntimeStateStore(db)
     state = state_store.get(f"gmail-history:{settings.dev_user_id}") or {}
-    health = state_store.get(f"gmail-monitor-health:{settings.dev_user_id}") or {}
-    monitor_operational = bool(
-        settings.gmail_background_monitor_enabled and health.get("last_status") == "OK"
+    health = monitor_status(
+        state_store.get(f"gmail-monitor-health:{settings.dev_user_id}") or {},
+        enabled=settings.gmail_background_monitor_enabled,
+        poll_seconds=settings.gmail_background_poll_seconds,
     )
     return {
         # Kept for the existing frontend: this now means the monitor is actually healthy,
         # not merely that the configuration flag is turned on.
-        "background_monitor_enabled": monitor_operational,
+        "background_monitor_enabled": health["operational"],
         "background_monitor_configured": settings.gmail_background_monitor_enabled,
         "poll_seconds": settings.gmail_background_poll_seconds,
         "pubsub_configured": bool(settings.gmail_pubsub_topic_name),
@@ -41,6 +43,7 @@ def gmail_runtime_status(db: Session = Depends(get_db)) -> dict:
         "last_poll_status": health.get("last_status"),
         "last_poll_decision": health.get("last_decision"),
         "last_error": health.get("last_error"),
+        "monitor_fresh": health["fresh"],
     }
 
 

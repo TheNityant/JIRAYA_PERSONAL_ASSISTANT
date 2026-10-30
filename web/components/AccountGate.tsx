@@ -15,10 +15,16 @@ export default function AccountGate() {
   const [connections, setConnections] = useState<ConnectionCatalogItem[] | null>(null);
   const [onboarding, setOnboarding] = useState(true);
 
-  async function refresh() {
+  async function refresh(checkSession = false) {
     try {
       const state = await api.account();
-      setAccount(state); setError("");
+      setAccount(state);
+      if (checkSession && state.auth_required && !state.user) {
+        setConnections(null);
+        setError("Your password was accepted, but the browser did not retain the sign-in session. Check the deployment's cookie settings or use the same-origin API proxy.");
+        return;
+      }
+      setError("");
       if (state.user || !state.auth_required) {
         const result = await api.listConnections();
         setConnections(result.catalog);
@@ -33,7 +39,7 @@ export default function AccountGate() {
       const url = new URL(window.location.href); url.hostname = "127.0.0.1";
       window.location.replace(url.toString()); return;
     }
-    refresh();
+    void refresh();
     const expired = () => {setAccount((state) => state ? {...state, user: null} : state); setConnections(null); setError("Your session expired. Sign in again.");};
     window.addEventListener("jiraya-session-expired", expired);
     return () => window.removeEventListener("jiraya-session-expired", expired);
@@ -45,7 +51,7 @@ export default function AccountGate() {
     try {
       if (signup) await api.register(name, email, password);
       else await api.login(email, password);
-      setPassword(""); await refresh();
+      setPassword(""); await refresh(true);
     } catch (e: any) {setError(e.message);}
     finally {setBusy(false);}
   }
@@ -59,7 +65,7 @@ export default function AccountGate() {
     } catch (e: any) {setError(e.message); setBusy(false);}
   }
 
-  if (!account) return <main className="account-shell"><section className="account-card"><h1>Jiraya</h1><p>{error || "Opening your workspace…"}</p>{error && <button onClick={refresh}>Try again</button>}</section></main>;
+  if (!account) return <main className="account-shell"><section className="account-card"><h1>Jiraya</h1><p>{error || "Opening your workspace…"}</p>{error && <button onClick={() => refresh()}>Try again</button>}</section></main>;
   if (account.auth_required && !account.user) return <main className="account-shell"><section className="account-card">
     <span className="eyebrow">Jiraya · Personal operations</span><h1>{signup ? "Create your account" : "Welcome back"}</h1>
     <p>Sign in, connect your accounts, and manage your automations here.</p>

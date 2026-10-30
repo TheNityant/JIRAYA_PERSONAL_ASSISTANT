@@ -36,6 +36,8 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://jiraya:jiraya_dev_password@localhost:5432/jiraya"
     enable_external_actions: bool = False
+    # embedded: the API runs monitors; external: only the standalone worker does.
+    automation_runtime_mode: Literal["embedded", "external"] = "embedded"
 
     dev_user_id: str = "local-dev-user"
     dev_user_email: str = "local@jiraya.dev"

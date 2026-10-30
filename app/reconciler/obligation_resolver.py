@@ -9,7 +9,7 @@ from app.models import Obligation
 from app.providers.base import ModelProvider
 
 
-OBLIGATION_RESOLVER_VERSION = 2
+OBLIGATION_RESOLVER_VERSION = 3
 
 
 class ObligationResolutionDecision(BaseModel):

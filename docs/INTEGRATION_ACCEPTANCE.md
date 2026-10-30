@@ -2,6 +2,9 @@
 
 This is a live-account test plan, not a record of successful live tests. Automated tests use isolated local repositories and provider fixtures. Record the actual result, automation/execution ID, time, and sanitized error for each step. Never paste OAuth credentials, pairing tokens, cookies or email bodies into a public issue.
 
+For ready-to-send emails, cross-connector combinations, reconciliation topics and
+expected results, use the [live connector test pack](LIVE_CONNECTOR_TEST_PACK.md).
+
 ## Establish the running version
 
 Run `git branch --show-current` and `git log -1 --oneline` in the actual checkout. The current working branch is `phase2e-generic-execution`; `main` does not include all subsequent changes. Restart the backend and local companion after updating Python code. The VS Code extension must be installed separately from its VSIX; pulling source does not upgrade an installed extension.
@@ -62,9 +65,9 @@ No Meet integration is present in the published Phase 2e code at the time this p
 
 ## First cloud deployment
 
-Render is a reasonable initial host for the current FastAPI/Postgres pilot. Use always-on paid compute for background polling, a paid persistent database, and a single backend process while the monitors remain in-process. The Dockerfile installs project dependencies from `pyproject.toml` and listens on the host-provided `PORT` (8000 by default). A separate durable worker/queue is a future implementation step; no worker entry point is supplied by this release.
+Render is a reasonable initial host for the current FastAPI/Postgres pilot. Use always-on compute and a durable persistent database for unattended polling. The default embedded mode needs one backend instance/process. The Dockerfile installs project dependencies from `pyproject.toml` and listens on the host-provided `PORT` (8000 by default). An optional standalone polling worker is available with `AUTOMATION_RUNTIME_MODE=external` and `python -m app.runtime.worker`; this remains a single-worker runtime, not a distributed queue. See [always-on deployment and closed-laptop acceptance tests](ALWAYS_ON_AUTOMATION.md).
 
-Owner settings: `APP_ENV=production`, `AUTH_REQUIRED=true`, `DATABASE_URL`, stable `TOKEN_ENCRYPTION_KEY`, model credentials, exact frontend origin/base URL, public OAuth callback URLs, and HTTPS cookie settings. Prefer same-site frontend/API domains; cross-site cookies may be blocked even with SameSite=None. Follow `SERVICE_INTEGRATIONS.md` for configuration details. Disable unrestricted registration for a private pilot after provisioning intended accounts.
+Owner settings: `APP_ENV=production`, `AUTH_REQUIRED=true`, `DATABASE_URL`, stable `TOKEN_ENCRYPTION_KEY`, model credentials, exact frontend origin/base URL, public OAuth callback URLs, and HTTPS cookie settings. Prefer same-site frontend/API domains; cross-site cookies may be blocked even with SameSite=None. For Vercel + Render, use the opt-in [same-origin proxy configuration](RENDER_VERCEL_LOGIN.md), including proxy-based OAuth callbacks. Follow `SERVICE_INTEGRATIONS.md` for configuration details. Disable unrestricted registration for a private pilot after provisioning intended accounts.
 
 Keep PostgreSQL and the API in the same region. A new cloud database does not automatically contain local connections or automation records: reconnect explicitly or perform an intentional database migration retaining ownership and the matching encryption key. The companion and native Git credentials stay on the user's development computer.
 

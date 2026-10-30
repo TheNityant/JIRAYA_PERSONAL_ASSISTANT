@@ -21,6 +21,7 @@ from app.workflows.gmail_reconciliation import GmailReconciliationWorkflow
 
 BOOTSTRAP_LOOKBACK_MS = 2 * 60 * 1000
 OPEN_OBLIGATION_SWEEP_LIMIT = 20
+THREAD_RECONCILIATION_LIMIT = 20
 
 
 class GmailRuntimeService:
@@ -131,12 +132,8 @@ class GmailRuntimeService:
             if not action_id or action_id in seen_actions:
                 continue
             seen_actions.add(action_id)
-            result = GmailReconciliationWorkflow(
-                db=self.db,
-                provider=self.provider,
-                gmail=self.gmail,
-            ).run(action_id=action_id)
-            self._notify_reconciliation(action_id=action_id, result=result)
+            batch = self._reconcile_thread(action_id)
+            result = batch[-1]
             results.append(
                 {
                     "action_id": action_id,
@@ -274,22 +271,9 @@ class GmailRuntimeService:
     def process_message(self, message: GmailMessage) -> dict:
         action = self.actions.latest_verified_for_thread(message.thread_id)
         if action is not None and message.id != (action.context or {}).get("source_message_id"):
-            workflow = GmailReconciliationWorkflow(
-                db=self.db,
-                provider=self.provider,
-                gmail=self.gmail,
-            )
-            reconciliation = workflow.run(action_id=action.id)
-            self._notify_reconciliation(action_id=action.id, result=reconciliation)
-
-            # If this incoming history event arrived after a user/agent SENT message that
-            # resolves an obligation, the first workflow pass may intentionally resolve the
-            # sent candidate first. Run once more so the current incoming acknowledgement
-            # or new request is not lost merely because resolution had priority.
-            follow_up_reconciliation = None
-            if "SENT" not in message.labels and reconciliation.get("decision") == "OBLIGATION_RESOLVED":
-                follow_up_reconciliation = workflow.run(action_id=action.id)
-                self._notify_reconciliation(action_id=action.id, result=follow_up_reconciliation)
+            batch = self._reconcile_thread(action.id)
+            reconciliation = batch[0]
+            follow_up_reconciliation = batch[1] if len(batch) > 1 else None
 
             # A tracked reply thread still feeds independent actions such as Calendar.
             # Scheduling replies must also process new proposals in an existing thread.
@@ -314,6 +298,7 @@ class GmailRuntimeService:
                 "calendar_results": independent_results,
                 "result": reconciliation,
                 "follow_up_result": follow_up_reconciliation,
+                "reconciliation_results": batch,
             }
 
         if "SENT" in message.labels:
@@ -346,6 +331,21 @@ class GmailRuntimeService:
             "path": "AUTOMATIONS",
             "results": results,
         }
+
+    def _reconcile_thread(self, action_id: str) -> list[dict]:
+        workflow = GmailReconciliationWorkflow(db=self.db, provider=self.provider, gmail=self.gmail)
+        results = []
+        for _ in range(THREAD_RECONCILIATION_LIMIT):
+            result = workflow.run(action_id=action_id)
+            if result.get("decision") == "NO_NEW_EVENT":
+                return results or [result]
+            self._notify_reconciliation(action_id=action_id, result=result)
+            results.append(result)
+            if result.get("decision") not in {
+                "RECONCILED", "OBLIGATION_RESOLVED", "OBLIGATION_STILL_OPEN"
+            }:
+                break
+        return results
 
     def _notify_reconciliation(self, *, action_id: str, result: dict) -> None:
         decision = result.get("decision")

@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 jiraya-companion = "app.local_companion.__main__:main"
+jiraya-worker = "app.runtime.worker:main"
 
 [project.optional-dependencies]
 dev = [

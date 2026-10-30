@@ -21,6 +21,7 @@ from app.integrations.github.oauth import (
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
 from app.services.runtime_state_store import RuntimeStateStore
+from app.runtime.status import monitor_status
 
 router = APIRouter(tags=["github"])
 
@@ -144,7 +145,11 @@ def github_status(db: Session = Depends(get_db)) -> dict:
         "scopes": list(connection.scopes or []) if connection else [],
         "oauth_configured": bool(settings.github_oauth_client_id and settings.github_oauth_client_secret),
         "health": RuntimeStateStore(db).get(_health_key(settings.dev_user_id)) or {},
-        "monitor": RuntimeStateStore(db).get(f"github-monitor-health:{settings.dev_user_id}") or {},
+        "monitor": monitor_status(
+            RuntimeStateStore(db).get(f"github-monitor-health:{settings.dev_user_id}") or {},
+            enabled=settings.github_background_monitor_enabled,
+            poll_seconds=settings.github_background_poll_seconds,
+        ),
         "background_monitor_configured": settings.github_background_monitor_enabled,
         "poll_seconds": settings.github_background_poll_seconds,
     }
@@ -245,7 +250,9 @@ def poll_github(db: Session = Depends(get_db)) -> dict:
         settings = get_settings()
         result = GitHubRuntimeService(db=db, settings=settings).poll()
         errors = result.get("errors") or []
+        # Keep manual diagnostics visible without claiming a background worker ran.
         RuntimeStateStore(db).set(f"github-monitor-health:{settings.dev_user_id}", {
+            "poll_source": "manual",
             "last_poll_at": datetime.now(UTC).isoformat(),
             "last_status": "ERROR" if errors else "OK", "last_decision": result["decision"],
             "last_error": "; ".join(error["detail"] for error in errors)[:1000] if errors else None,

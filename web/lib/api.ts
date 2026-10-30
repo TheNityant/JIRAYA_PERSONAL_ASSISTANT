@@ -106,7 +106,7 @@ export type ServiceStatus = {
   scopes: string[];
   oauth_configured: boolean;
   health: Record<string, unknown>;
-  monitor?: { last_status?: string; last_error?: string; last_poll_at?: string; last_decision?: string };
+  monitor?: { last_status?: string; last_error?: string; last_poll_at?: string; last_decision?: string; fresh?: boolean; operational?: boolean };
   background_monitor_configured?: boolean;
   poll_seconds?: number;
 };

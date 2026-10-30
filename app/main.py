@@ -1,5 +1,4 @@
-import asyncio
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,8 +20,9 @@ from app.routes import (
     health,
     notifications,
     reconciliation,
+    runtime,
 )
-from app.runtime.background import calendar_monitor_loop, github_monitor_loop, gmail_monitor_loop
+from app.runtime.background import running_monitors
 
 settings = get_settings()
 
@@ -30,23 +30,12 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    monitor_task: asyncio.Task | None = None
-    if settings.gmail_background_monitor_enabled:
-        monitor_task = asyncio.create_task(gmail_monitor_loop(settings))
-    calendar_task = (asyncio.create_task(calendar_monitor_loop(settings))
-                     if settings.calendar_background_monitor_enabled else None)
-    github_task = (asyncio.create_task(github_monitor_loop(settings))
-                   if settings.github_background_monitor_enabled else None)
-    try:
+    current = get_settings()
+    if current.automation_runtime_mode == "external":
         yield
-    finally:
-        for task in (monitor_task, calendar_task, github_task):
-            if task:
-                task.cancel()
-        for task in (monitor_task, calendar_task, github_task):
-            if task:
-                with suppress(asyncio.CancelledError):
-                    await task
+    else:
+        async with running_monitors(current):
+            yield
 
 
 from app.security.sessions import AccountMiddleware
@@ -82,6 +71,7 @@ app.include_router(automations.router)
 app.include_router(automation_execution.router)
 app.include_router(connections.router)
 app.include_router(notifications.router)
+app.include_router(runtime.router)
 
 
 @app.get("/")

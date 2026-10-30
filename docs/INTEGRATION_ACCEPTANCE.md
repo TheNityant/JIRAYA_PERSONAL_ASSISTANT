@@ -2,6 +2,9 @@
 
 This is a live-account test plan, not a record of successful live tests. Automated tests use isolated local repositories and provider fixtures. Record the actual result, automation/execution ID, time, and sanitized error for each step. Never paste OAuth credentials, pairing tokens, cookies or email bodies into a public issue.
 
+For ready-to-send emails, cross-connector combinations, reconciliation topics and
+expected results, use the [live connector test pack](LIVE_CONNECTOR_TEST_PACK.md).
+
 ## Establish the running version
 
 Run `git branch --show-current` and `git log -1 --oneline` in the actual checkout. The current working branch is `phase2e-generic-execution`; `main` does not include all subsequent changes. Restart the backend and local companion after updating Python code. The VS Code extension must be installed separately from its VSIX; pulling source does not upgrade an installed extension.

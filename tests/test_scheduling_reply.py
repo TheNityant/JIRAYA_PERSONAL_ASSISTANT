@@ -16,6 +16,7 @@ from app.models import AutomationExecution
 NOW = datetime(2026, 10, 26, 3, 30, tzinfo=UTC)  # Monday 09:00 Asia/Kolkata
 POLICY = {
     "enabled": True,
+    "duration_minutes": 30,
     "time_zone": "Asia/Kolkata",
     "notice_minutes": 60,
     "calendar_ids": ["primary"],
@@ -516,3 +517,11 @@ def test_busy_alternatives_preserve_explicit_meeting_duration(setup):
     _, evidence = prepare(setup, {"kind": "proposed", "timezone_explicit": True,
         "slots": [{"start": "2026-10-28T14:00:00+05:30", "end": "2026-10-28T15:30:00+05:30"}]})
     assert all((datetime.fromisoformat(row["end"]) - datetime.fromisoformat(row["start"])).total_seconds() == 90 * 60 for row in evidence["slots"])
+
+
+def test_scheduling_one_hour_default_and_explicit_range_precedence(setup):
+    setup.automation.action_config["calendar_scheduling"].pop("duration_minutes", None)
+    body, evidence = prepare(setup, {"kind": "proposed", "timezone_explicit": True, "slots": [{"start": "2026-10-28T15:00:00+05:30"}]})
+    assert "15:00–16:00" in body
+    body, evidence = prepare(setup, {"kind": "proposed", "timezone_explicit": True, "slots": [{"start": "2026-10-28T15:00:00+05:30", "end": "2026-10-28T17:00:00+05:30"}]})
+    assert "15:00–17:00" in body

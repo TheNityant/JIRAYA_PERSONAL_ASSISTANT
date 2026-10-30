@@ -39,3 +39,16 @@ def test_ambiguous_nonexistent_or_date_only_times_are_not_booked(start, zone):
     from app.automation.calendar_extraction import EventDetailsRequired, apply_event_defaults
     with pytest.raises(EventDetailsRequired):
         apply_event_defaults({"summary": "Meeting", "start": start, "end": None}, zone=zone, duration=30)
+
+
+def test_unconfigured_duration_defaults_to_one_hour_but_explicit_range_wins():
+    from app.automation.calendar_extraction import apply_event_defaults, event_defaults
+    rule = SimpleNamespace(action_config={"event_time_zone": "Asia/Kolkata"}, context_config={})
+    zone, duration = event_defaults(rule)
+    assert duration == 60
+    result = apply_event_defaults({"summary": "Meeting", "start": "2026-10-30T15:00:00", "end": None}, zone=zone, duration=duration)
+    assert result["end"].isoformat() == "2026-10-30T16:00:00+05:30"
+    result = apply_event_defaults({"summary": "Meeting", "start": "2026-10-30T15:00:00", "end": "2026-10-30T17:00:00"}, zone=zone, duration=duration)
+    assert result["end"].isoformat() == "2026-10-30T17:00:00+05:30"
+    rule.action_config["event_duration_minutes"] = 45
+    assert event_defaults(rule)[1] == 45

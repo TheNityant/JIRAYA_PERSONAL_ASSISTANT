@@ -7,6 +7,9 @@ from zoneinfo import ZoneInfo
 from pydantic import TypeAdapter
 
 
+DEFAULT_MEETING_MINUTES = 60
+
+
 class EventDetailsRequired(ValueError):
     pass
 
@@ -24,8 +27,12 @@ def event_defaults(automation):
             zone = zones.pop()
     if duration is None:
         durations = set(re.findall(r"\bdefault(?: meeting)? duration(?:\s+of|\s*:)?\s+(\d+)\s+minutes\b", context, re.I))
+        if len(durations) > 1:
+            raise EventDetailsRequired("Conflicting default durations need review. Set Default event minutes explicitly.")
         if len(durations) == 1:
             duration = int(durations.pop())
+    if duration is None:
+        duration = DEFAULT_MEETING_MINUTES
     if zone:
         ZoneInfo(zone)
     if duration is not None and (type(duration) is not int or not 15 <= duration <= 120):

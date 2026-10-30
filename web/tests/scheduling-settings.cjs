@@ -25,6 +25,7 @@ export default function Page(){
   const context=await browser.newContext({timezoneId:'Asia/Kolkata',viewport:{width:1280,height:1100}}),page=await context.newPage();await page.goto(url);
   const toggle=page.getByRole('checkbox',{name:'Check availability and suggest meeting times',exact:true});
   assert.equal(await toggle.isChecked(),false);await toggle.check();
+  assert.equal(await page.getByLabel('Default meeting minutes',{exact:true}).inputValue(),'60');
   await page.getByLabel('Scheduling timezone',{exact:true}).fill('Asia/Kolkata');
   await page.getByLabel('Working day starts',{exact:true}).fill('10:00');
   await page.getByLabel('Default meeting minutes',{exact:true}).fill('45');

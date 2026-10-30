@@ -216,7 +216,7 @@ export default function AutomationBuilder() {
   function updateAction(key: string, value: unknown) {
     updateDraft((current) => ({
       ...current,
-      action_config: { ...current.action_config, [key]: value, ...(key === "type" && value !== "DRAFT_REPLY" ? {calendar_scheduling: {enabled:false}} : {}), ...(key === "type" && value === "CREATE_CALENDAR_EVENT" ? {event_time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone, event_duration_minutes: 30} : {}) },
+      action_config: { ...current.action_config, [key]: value, ...(key === "type" && value !== "DRAFT_REPLY" ? {calendar_scheduling: {enabled:false}} : {}), ...(key === "type" && value === "CREATE_CALENDAR_EVENT" ? {event_time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone, event_duration_minutes: 60} : {}) },
     }));
   }
 
@@ -612,7 +612,7 @@ export default function AutomationBuilder() {
             {draft.action_config.type === "CREATE_CALENDAR_EVENT" && <>
               <div className="policy-explainer">Creates a dated event from matching emails. Set defaults for emails without a timezone or end time. For availability checks, booking and a reply together, choose Reply to email and enable Calendar-backed scheduling. Calendar invitations are not sent.</div>
               <label>Default event timezone<input value={str(draft.action_config.event_time_zone)} placeholder="Asia/Kolkata" onChange={e => updateAction("event_time_zone", e.target.value)}/></label>
-              <label>Default event minutes<input type="number" min={15} max={120} value={draft.action_config.event_duration_minutes === undefined ? "" : Number(draft.action_config.event_duration_minutes)} placeholder="30" onChange={e => updateAction("event_duration_minutes", Number(e.target.value))}/></label>
+              <label>Default event minutes<input type="number" min={15} max={120} value={draft.action_config.event_duration_minutes === undefined ? "" : Number(draft.action_config.event_duration_minutes)} placeholder="60" onChange={e => updateAction("event_duration_minutes", Number(e.target.value))}/></label>
             </>}
             {draft.source === "gmail" && draft.action_config.type === "DRAFT_REPLY" && <SchedulingSettings value={draft.action_config.calendar_scheduling} connected={isConnected(connections,"google_calendar")} onChange={value => updateAction("calendar_scheduling",value)}/>}
             <label>Action instructions<textarea rows={4} value={str(draft.action_config.instructions)} onChange={(e) => updateAction("instructions", e.target.value)} /></label>

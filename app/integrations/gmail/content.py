@@ -54,3 +54,37 @@ def extract_authored_text(body: str) -> str:
         authored = authored[: header_block.start()].strip()
 
     return authored
+
+
+def valid_web_url(value: str) -> bool:
+    """Validate link syntax without opening it or resolving its hostname."""
+    from urllib.parse import urlsplit
+
+    if len(value) > 2048 or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        return bool(
+            parsed.scheme.lower() in {"http", "https"}
+            and parsed.hostname and not parsed.username and not parsed.password
+            and (port is None or 0 < port <= 65535)
+        )
+    except ValueError:
+        return False
+
+
+def source_links(body: str) -> list[str]:
+    """Copy unique authored HTTP(S) links, excluding quoted conversation history."""
+    authored = extract_authored_text(body)
+    links = []
+    for found in re.finditer(r'''https?://[^\s<>"'`]+''', authored, flags=re.IGNORECASE):
+        value = found.group().rstrip(".,")
+        for last, first in ((")", "("), ("]", "["), ("}", "{")):
+            while value.endswith(last) and value.count(last) > value.count(first):
+                value = value[:-1]
+        if valid_web_url(value) and value not in links:
+            links.append(value)
+        if len(links) == 20:
+            break
+    return links

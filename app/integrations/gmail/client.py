@@ -1,6 +1,4 @@
 import base64
-import html
-import re
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
 from typing import Any
@@ -10,6 +8,8 @@ from googleapiclient.discovery import build
 
 from app.config import Settings
 from app.integrations.gmail.auth import load_credentials
+from app.integrations.gmail.content import extract_authored_text, source_links
+from app.integrations.gmail.html_text import html_to_text
 from app.integrations.gmail.models import GmailMessage
 
 
@@ -208,7 +208,19 @@ class GmailClient:
                     plain_parts.append(nested)
 
         if plain_parts:
-            return "\n".join(plain_parts)
+            plain = "\n".join(plain_parts)
+            authored = extract_authored_text(plain)
+            missing = []
+            for part in html_parts:
+                for url in source_links(part):
+                    if url not in authored and url not in missing:
+                        missing.append(url)
+            if authored and missing:
+                # HTML alternatives can contain button hrefs absent from text/plain.
+                # Insert before quoted history so they retain their authored provenance.
+                normalized = plain.replace("\r\n", "\n").replace("\r", "\n").strip()
+                return authored + "\n\nLinks from email:\n" + "\n".join(missing) + normalized[len(authored):]
+            return plain
         if html_parts:
             return "\n".join(html_parts)
         if data:
@@ -223,7 +235,4 @@ class GmailClient:
 
     @staticmethod
     def _html_to_text(value: str) -> str:
-        value = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
-        value = re.sub(r"</p\s*>", "\n", value, flags=re.IGNORECASE)
-        value = re.sub(r"<[^>]+>", "", value)
-        return html.unescape(value)
+        return html_to_text(value)

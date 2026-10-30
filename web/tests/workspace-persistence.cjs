@@ -22,10 +22,10 @@ async function main(){
   if(url.pathname==='/automation-executions')return json(url.searchParams.get('automation_id')==='calendar-rule'?[execution]:[]);
   if(url.pathname==='/gmail/inbox/recent')return json({items:[{id:'chosen-email',subject:'Chosen interview',sender:'sender@example.test'}]});
   if(url.pathname.endsWith('/preview/gmail')){calls.push({path:url.pathname,body:JSON.parse(body)});return json({message:{id:'chosen-email',subject:'Chosen interview'},match:{matches:true,confidence:1,reason:'Fixture match'}});}
-  if(url.pathname.endsWith('/run/gmail')){calls.push({path:url.pathname,body:JSON.parse(body)});execution={...execution,status:'AWAITING_APPROVAL',source_event_id:JSON.parse(body).message_id,output:{proposal:{summary:'Fixture interview',start:'2026-11-02T15:00:00+05:30',end:'2026-11-02T16:00:00+05:30'}}};return json({decision:'AWAITING_APPROVAL',execution});}
+  if(url.pathname.endsWith('/run/gmail')){calls.push({path:url.pathname,body:JSON.parse(body)});execution={...execution,status:'AWAITING_APPROVAL',source_event_id:JSON.parse(body).message_id,output:{source_links:['https://meet.google.com/abc-defg-hij'],proposal:{summary:'Fixture interview',start:'2026-11-02T15:00:00+05:30',end:'2026-11-02T16:00:00+05:30'}}};return json({decision:'AWAITING_APPROVAL',execution});}
   if(url.pathname==='/notifications')return json({items:[],unread_count:0});
   if(url.pathname==='/obligations')return json([]);
-  if(url.pathname==='/runtime/gmail/status')return json({background_monitor_enabled:true,background_monitor_configured:true,poll_seconds:15,mailbox:user.email});
+  if(url.pathname==='/runtime/gmail/status')return json({background_monitor_enabled:true,background_monitor_configured:true,poll_seconds:15,last_poll_at:'2026-10-30T10:00:00Z',mailbox:user.email});
   if(url.pathname==='/github/status')return json({connected:true,account:'fixture',scopes:[],health:{}});
   if(url.pathname==='/github/briefing/status')return json({configured:false,message:'Not configured'});
   if(url.pathname==='/github/repos')return json({items:[]});
@@ -51,6 +51,7 @@ async function main(){
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
   await page.goto(frontend);await page.getByRole('button',{name:/Saved email to Calendar/}).click();
   await page.getByRole('button',{name:'Debug · Run latest',exact:true}).waitFor();
+  await page.getByLabel('Background Gmail monitoring').filter({hasText:'Last completed check:'}).waitFor();
   await page.getByText('Fixture: missing meeting start time',{exact:true}).waitFor();
   if(process.env.JIRAYA_UI_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_UI_SCREENSHOT});
   await page.getByRole('button',{name:'Retry this email',exact:true}).click();
@@ -61,6 +62,7 @@ async function main(){
   await page.getByRole('button',{name:'Debug · Test match',exact:true}).click();await page.getByText('Fixture match',{exact:false}).waitFor();
   await page.getByRole('button',{name:'Debug · Run selected email',exact:true}).click();
   await page.getByRole('button',{name:'Approve & Create event',exact:true}).waitFor();assert.deepEqual(calls.at(-1).body,{message_id:'chosen-email',force:false});
+  assert.equal(await page.getByRole('link',{name:'Meeting / source link ↗',exact:true}).getAttribute('href'),'https://meet.google.com/abc-defg-hij');
   await page.reload();await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor();await page.getByRole('button',{name:'Approve & Create event',exact:true}).waitFor();
   disconnected=true;await page.reload();await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor(); // Saved rules survive connector attention.
   disconnected=false;

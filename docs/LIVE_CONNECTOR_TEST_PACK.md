@@ -49,7 +49,7 @@ execution** panel sits directly below its title. Save changes before testing.
 - If no background execution appears but a manual run succeeds, inspect runtime
   status and hosting uptime. A manual pass does not prove unattended monitoring.
 
-## A. Gmail → Calendar event: C01–C06
+## A. Gmail → Calendar event: C01–C08
 
 Create a Gmail / New email rule with **Create calendar event**. Set **Default
 event timezone** to `Asia/Kolkata` and **Default event minutes** to `60`.
@@ -126,6 +126,35 @@ that same source email without forcing a new execution.
 
 Expected: the existing execution is reported and Calendar still has exactly one
 event. A newly sent email is a new source event and is not this duplicate test.
+
+### C07 — Preserve a meeting URL
+
+Use the C01 rule with a fresh subject marker `JY-C07-A`. Send a future meeting
+request and include a real meeting URL copied directly from your meeting provider.
+Test both a plain URL and an HTML email with a **Join meeting** hyperlink/button.
+A text/plain alternative that contains only the button label must not hide its HTML target.
+
+Expected: the exact URL appears in the Calendar description. If there is exactly
+one recognized Meet/Zoom/Teams/Webex/Jitsi/Whereby link, it also appears in Location.
+Multiple meeting URLs remain in the description without choosing one arbitrarily.
+The execution proposal exposes source links. Readback missing those links must not
+report verified success; combined booking must not send a false confirmation.
+Existing events are not retroactively changed by this update; use a fresh source
+email to test. A URL is copied, not opened or checked for meeting admission.
+
+### C08 — Self-addressed Inbox mail versus ordinary Sent mail
+
+Save an enabled **Automatic → Create calendar event** rule with a unique subject
+filter. Send a fresh matching meeting request to the connected account itself.
+If Gmail labels that message both **INBOX** and **SENT**, Calendar creation is
+eligible and should happen once without Debug. An ordinary **SENT** message to
+someone else, absent **INBOX**, must not create an event from this rule.
+Automatic reply rules remain excluded for SENT-labelled mail to prevent self-reply loops.
+
+For any unattended test, save the correct rule before sending. An email already
+consumed under a wrong rule is not replayed simply because the rule is edited.
+Wait at least two configured polling intervals plus processing time and inspect
+the displayed last completed check. A sleeping/stopped backend cannot poll Gmail.
 
 ## B. Gmail × Calendar availability + reply: S01–S08
 

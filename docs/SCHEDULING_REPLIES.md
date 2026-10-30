@@ -55,7 +55,7 @@ Calendar failures now distinguish connection/reconnect problems, action-safety r
 
 ## Live retest after updating
 
-Restart backend/frontend, reconnect Calendar and confirm its events load. Verify Gmail monitoring is enabled and the app owner has enabled external actions if you want writes. Pause overlapping reply/event rules for the test. Send from a different account into the connected inbox, after saving/enabling the rule; the monitor deliberately ignores SENT messages, including self-sent tests labelled SENT. Wait two configured Gmail polling intervals. Debug Run latest defaults to the latest unread inbox message, so keep the test unread or use its message ID through the API.
+Restart backend/frontend, reconnect Calendar and confirm its events load. Verify Gmail monitoring is enabled and the app owner has enabled external actions if you want writes. Pause overlapping reply/event rules for the test. Send from a different account into the connected inbox after saving/enabling the rule. Automatic reply actions ignore SENT-labelled messages to avoid self-reply loops. Independent Calendar/GitHub actions may process self-addressed mail labelled both INBOX and SENT; ordinary Sent-only messages stay excluded. Wait two configured Gmail polling intervals plus processing time and inspect the last completed check. Debug Run latest uses the latest inbox message regardless of read state; Choose inbox email pins the exact source for testing. Editing a rule does not replay mail already checked under its previous settings.
 
 Use subject `JIRAYA-CALENDAR-TEST` and sender filter for your test account. Set Asia/Kolkata, all relevant weekdays, suitable working hours, 30 minutes and a future date inside the horizon. First test Create calendar event with an email that explicitly includes date, start/end and timezone. Expect VERIFIED_SUCCESS and one actual event. For combined scheduling choose Reply to email, enable availability plus booking, and test a free proposed slot, a busy proposed slot, no time, and a new proposal in an existing thread. A free single proposal should create one event and one verified reply; conflicts or absent times should send only checked suggestions. With a 60-minute gap, an event ending 15:00 should block a new meeting before 16:00. Automatic still requires the action-safety check and external-action setting.
 
@@ -76,3 +76,21 @@ Calendar JSON extraction uses a bounded 1024-token response; ordinary model call
 ### One-hour fallback duration
 
 When the email omits an end time/duration and no custom rule duration is saved, standalone event creation and scheduling replies use 60 minutes. Explicit email ranges/durations take precedence (for example 15:00–17:00 remains two hours). Existing rules with an explicitly saved 30-minute duration or a context instruction requesting 30 minutes retain that customization; set Default event minutes or Default meeting minutes to 60 once to update those rules. Structured duration settings take precedence over context defaults.
+
+
+### Preserving meeting links
+
+Standalone event creation and combined availability/booking preserve HTTP(S) links
+from the authored email, independently of the model summary. Recognized single
+meeting links are also placed in Location; multiple links remain in the description.
+HTML button targets are retained, including when missing from the text/plain alternative;
+quoted older links are excluded. The supplied URL is not corrected or opened.
+Provider readback must retain the copied links before creation is verified or a
+combined booking confirmation is sent. Existing created events are not silently
+rewritten. No additional OAuth permission is needed to populate these event fields.
+
+`tests/test_calendar_source_links.py` covers source links, HTML alternatives, policies
+and readback loss. `tests/test_gmail_automatic_calendar.py` runs the real automatic
+history/executor path, including a background loop with no Debug HTTP request,
+self-addressed Inbox mail, Sent-only exclusion and rule changes versus fresh mail.
+These fixtures establish orchestration behavior, not live account/hosting health.

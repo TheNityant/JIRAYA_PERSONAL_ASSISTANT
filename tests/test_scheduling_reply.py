@@ -525,3 +525,40 @@ def test_scheduling_one_hour_default_and_explicit_range_precedence(setup):
     assert "15:00–16:00" in body
     body, evidence = prepare(setup, {"kind": "proposed", "timezone_explicit": True, "slots": [{"start": "2026-10-28T15:00:00+05:30", "end": "2026-10-28T17:00:00+05:30"}]})
     assert "15:00–17:00" in body
+
+
+@pytest.mark.parametrize("lose_link", [False, True])
+def test_combined_booking_preserves_the_original_meeting_link(setup, monkeypatch, lose_link):
+    from dataclasses import replace
+
+    link = "https://meet.google.com/abc-defg-hij?authuser=1"
+    setup.gmail.source = replace(setup.gmail.source, body="Interview at 2 PM. Join: " + link)
+    setup.gmail.messages[setup.gmail.source.id] = setup.gmail.source
+    calendar = BookingCalendar()
+    if lose_link:
+        original = calendar.get_event
+        calendar.get_event = lambda **kwargs: {**original(**kwargs), "description": "Dropped", "location": ""}
+    monkeypatch.setattr(scheduling, "get_calendar_client", lambda *a: calendar)
+    monkeypatch.setattr("app.automation.scheduling_booking.get_calendar_client", lambda *a: calendar)
+    setup.automation.approval_policy = "AUTO"
+    setup.automation.action_config["calendar_scheduling"]["book_proposed"] = True
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(setup.automation)
+        db.commit()
+        executor = AutomationExecutor(
+            settings=Settings(enable_external_actions=True), db=db,
+            provider=Provider({"kind": "proposed", "timezone_explicit": True,
+                "slots": [{"start": "2026-10-28T14:00:00+05:30"}]}), gmail=setup.gmail,
+        )
+        result = executor.run(automation=setup.automation)
+        event = next(iter(calendar.events.values()))
+        assert event["location"] == link and link in event["description"]
+        if lose_link:
+            assert result["execution"]["status"] == "FALLBACK_NOTIFICATION"
+            assert calendar.inserts == 1 and setup.gmail.send_calls == 0
+        else:
+            assert result["verification_status"] == "VERIFIED_SUCCESS"
+            assert calendar.inserts == setup.gmail.send_calls == 1
+    engine.dispose()

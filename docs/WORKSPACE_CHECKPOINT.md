@@ -6,24 +6,17 @@ A normal hosted frontend cannot execute Git in arbitrary desktop folders. A smal
 
 ## Install once on your development computer
 
-From the Jiraya checkout, with Python 3.12+ and Git installed:
+Install Python 3.12+ and Git locally. Download [Jiraya Workspace 0.4.0](../extensions/jiraya-workspace/jiraya-workspace-0.4.0.vsix), then use VS Code → Extensions → ⋯ → **Install from VSIX**. Reload your project windows. The package includes the minimal helper; a local Jiraya backend checkout and `.env` are unnecessary.
 
-```powershell
-python -m pip install -e .
-python -m app.local_companion serve
-```
+In the hosted Jiraya frontend, open **GitHub → Connect with VS Code**. Allow the browser to open VS Code, confirm the exact website, and approve **Set up helper**. The extension checks Python and installs the helper dependencies in an isolated environment if required. Allow the browser's local-network access prompt, then return to the original Jiraya tab. It completes pairing automatically without copying a token or putting a token into a URL.
 
-Keep this terminal running. It prints a pairing token and starts on `127.0.0.1:8765`. It does not change your `.env` or start the cloud backend. The usual frontend/backend can run alongside it.
+Open trusted local VS Code project windows. Each window registers independently; multi-root workspaces and nested repositories already detected by VS Code Git are supported. Run **Jiraya: Add Git Projects** to select several existing repository folders with a native folder picker. Choose each target branch in the website and enable its checkpoint policy. The checkout must already be on that branch. Disable a policy before changing its target branch.
 
-Install the included VS Code extension from the repository root:
+The extension remembers the Python interpreter and starts the helper on subsequent VS Code startups. **Jiraya: Set Up Local Companion** repairs/reselects Python. **Jiraya: Stop Local Companion** stops only the helper started by that window, and waits for you to finish active checkpoints. If an older manually started companion is running, stop it in its original terminal with Ctrl+C before using the new packaged helper.
 
-```powershell
-code --install-extension extensions/jiraya-workspace/jiraya-workspace-0.3.0.vsix --force
-```
+Pairing is saved per Jiraya account in that browser profile and frontend origin. Sign-out does not erase it. A different computer, browser profile, domain, private window, cleared storage or explicit **Forget pairing** requires a new pairing. The old unscoped browser pairing is not silently transferred to another account: pair once after this upgrade. The local helper remains scoped to the OS user/device; its project policies are not cloud-synced across computers. VS Code uses SecretStorage for its device token.
 
-Run **Jiraya: Pair Local Companion** in VS Code's Command Palette and paste the companion token. Open/reload your other project windows. Each trusted local window registers independently; multi-root workspaces are supported. Version 0.3.0 also reports nested repositories already detected by VS Code's Git integration. Run **Jiraya: Add Git Projects** to choose multiple existing repository folders with a native folder picker and add them to the workspace. The extension uses VS Code SecretStorage for the token. Remote SSH/WSL/container environments need a companion in that environment; this release targets local desktop folders.
-
-In Jiraya's **GitHub → Local workspace checkpoint** panel, enter the same token and connect. The token is remembered in that browser profile, on this frontend origin. Select the branch for each project and click **Enable checkpoint**. The local checkout must already be on that branch. Disable the policy before changing its target branch.
+Google/GitHub OAuth connections and automations are separate: they remain in the cloud database when you sign out, with stable database and token-encryption configuration. Reauthorization may still be required after revocation, expired authorization, scope changes, or Google testing-mode token expiry. Pairing a local device does not replace cloud OAuth or local Git authentication.
 
 The companion remembers enabled projects in the current user's local app data. Windows uses `%LOCALAPPDATA%/Jiraya/companion`; other systems use `~/.local/share/Jiraya/companion`. `--config-dir` can select another location. Pair only the frontend you use. To revoke an old pairing, stop the companion, remove `companion.json` from that directory and restart; this also resets local policies/history.
 
@@ -51,7 +44,7 @@ Only saved disk contents can be committed. Reported unsaved documents cause that
 
 ## Registration diagnostics
 
-After updating, restart the companion, install `jiraya-workspace-0.3.0.vsix`, and run **Developer: Reload Window** in your VS Code project windows. The browser and extension use the same companion token; no `.env` edit is needed.
+After updating, restart the companion, install `jiraya-workspace-0.4.0.vsix`, and run **Developer: Reload Window** in your VS Code project windows. The browser and extension use the same companion token; no `.env` edit is needed.
 
 The extension status bar reports registered Git project counts or an actionable connection error. Click it or run **Jiraya: Show Workspace Diagnostics** to open **Output → Jiraya Workspace** and refresh registration. Diagnostics show the configured port, workspace trust, local folders, registration failures and project branches; they do not print pairing tokens or file contents. A failed replacement token is not saved over working credentials. Token changes automatically refresh other active windows using the same VS Code secret storage.
 
@@ -76,7 +69,7 @@ While this command remains running, those folders count as open. It cannot obser
 
 ## Hosted frontend
 
-Start the companion with the exact deployed frontend origin:
+The website → VS Code pairing flow approves the exact hosted origin automatically. Render does not run the device helper: it cannot access laptop folders. The packaged helper starts on your computer. For other IDEs or manual operation, start it from a Jiraya checkout with the exact frontend origin:
 
 ```powershell
 python -m app.local_companion serve --origin https://your-jiraya.example
@@ -86,9 +79,20 @@ Repeat `--origin` to allow additional origins. Permit the browser's local-networ
 
 ## Packaging and verification
 
-The included VSIX is built from `extensions/jiraya-workspace` with `npx --yes @vscode/vsce package --allow-missing-repository`. No Marketplace publication is required for local installation.
+The included VSIX is built with `python extensions/jiraya-workspace/build_vsix.py`. The reproducible allowlist includes only extension files and the minimal companion sources. A plain vsce package from the source directory does not include that helper bundle. No Marketplace publication is required for local installation.
 
 `tests/test_workspace_checkpoint.py` exercises real temporary local repositories and bare remotes, including saved changes, unpushed commits, branch targeting, failed pushes/retry, diverged remotes, multiple projects, credential filename exclusions, open-window registration and loopback API pairing. The pairing regression test uses a real isolated companion and Chromium, including password-manager changes that bypass React state. Run it from `web` with `node tests/workspace-pairing.cjs` after installing Playwright and its Chromium browser (`npm install --no-save playwright`, then `npx playwright install chromium`). It requires the project Python dependencies. It temporarily creates a test route, uses ports 3117 and 8876, and removes its route and test configuration when finished; it never performs a checkpoint or push. Other browser checks use controlled companion responses. These tests do not establish that a particular Windows Git credential setup or browser policy is configured correctly.
+
+The hosted-flow regression checks are `tests/test_hosted_companion.py`,
+`tests/test_saved_workspace.py`, `tests/test_automation_debug.py` and
+`web/tests/workspace-persistence.cjs`. They verify exact-origin, expiring single-use
+handoff, retained account connections/rules, exact-message debugging, restored
+execution results, two project cards and browser pairing across logout/login.
+`JIRAYA_TEST_PYTHON=/path/to/test/python node --test extensions/jiraya-workspace/test/*.cjs`
+also starts the actual packaged helper and checks a fresh extension session can
+reuse its token and project settings. The test Python needs the helper dependencies.
+These checks use local fixtures and temporary state; they do not validate live
+Google/GitHub credentials, Windows Python installation, or browser permission policy.
 
 ## Companion port already in use
 

@@ -47,6 +47,7 @@ async function main() {
     browser = await chromium.launch(launch);
     const page = await browser.newPage();
     await page.goto(url);
+    await page.getByText('Manual pairing / custom port',{exact:true}).click();
     const field = page.getByLabel('Pairing token', {exact:true});
     await field.fill(token);
     await page.getByLabel('Local port', {exact:true}).fill('8876');
@@ -56,6 +57,7 @@ async function main() {
     await page.getByText('Companion connected', {exact:true}).waitFor();
     console.log('PASS: typed token and persisted pairing with real companion');
     await page.getByRole('button', {name:'Forget pairing'}).click();
+    await page.getByText('Manual pairing / custom port',{exact:true}).click();
     await field.fill('wrong-token');
     await page.getByRole('button', {name:'Connect companion',exact:true}).click();
     await page.getByRole('alert').filter({hasText:/token/i}).waitFor();
@@ -68,7 +70,7 @@ async function main() {
     await page.getByRole('button', {name:'Connect companion',exact:true}).click();
     assert.equal((await health).status(), 200, 'Submit must authenticate with the visible form value, not stale React state');
     await page.getByText('Companion connected', {exact:true}).waitFor();
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('jiraya.companion')));
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('jiraya.companion:local')));
     assert.equal(saved.token, token, 'Persist the same normalized token that was authenticated');
     await page.reload();
     await page.getByText('Companion connected', {exact:true}).waitFor();

@@ -30,7 +30,8 @@ def main():
     if args.command == "serve":
         import uvicorn
 
-        origins = args.origin or ["http://localhost:3000", "http://127.0.0.1:3000"]
+        origins = args.origin or ["http://localhost:3000", "http://127.0.0.1:3000",
+                                  "https://jiraya-personal-assistant.vercel.app"]
         # Reserve the actual socket before creating state or printing a token.
         # Passing that same socket to Uvicorn avoids a check-then-bind race.
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:

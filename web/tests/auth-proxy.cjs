@@ -21,6 +21,7 @@ async function main() {
     const json = (status, data) => {res.writeHead(status, {'Content-Type':'application/json'}); res.end(JSON.stringify(data));};
     if (url.pathname === '/health') return json(200, {status:'ok'});
     if (url.pathname === '/auth/me') return json(200, {user, auth_required:true, registration_enabled:true});
+    if (url.pathname === '/automations') return json(200, []);
     if (url.pathname === '/auth/login') {
       if (req.headers.origin !== frontend) return json(403, {detail:'Request origin is not allowed.'});
       let body = ''; for await (const chunk of req) body += chunk;

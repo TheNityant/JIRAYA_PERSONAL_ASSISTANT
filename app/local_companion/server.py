@@ -7,11 +7,13 @@ import time
 from datetime import UTC, datetime
 from inspect import signature
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.integrations.github.validation import validate_branch
@@ -52,6 +54,26 @@ class RunRequest(BaseModel):
     message: str = Field(default="Jiraya workspace checkpoint", min_length=1, max_length=200)
 
 
+class PairingRequest(BaseModel):
+    nonce: str = Field(pattern=r"^[a-f0-9]{64}$")
+    origin: str = Field(max_length=300)
+
+
+class PairingClaim(BaseModel):
+    nonce: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+def frontend_origin(value: str) -> str:
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"} or not parsed.hostname
+        or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment
+        or (parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1"})
+    ):
+        raise ValueError("Use an HTTPS frontend origin, or HTTP localhost for development")
+    return value
+
+
 class Companion:
     def __init__(self, directory: Path):
         self.directory = directory
@@ -66,6 +88,7 @@ class Companion:
         self.sessions = {}
         self.job = None
         self.running = False
+        self.pairings = {}
 
     def save(self):
         temporary = self.file.with_suffix(".tmp")
@@ -271,6 +294,7 @@ class Companion:
 
 def create_companion(directory: Path, origins: list[str]) -> FastAPI:
     state = Companion(directory)
+    origins = list(dict.fromkeys(origins + state.config.get("origins", [])))
     app = FastAPI(title="Jiraya Local Workspace Companion", docs_url=None, redoc_url=None)
     app.state.companion = state
     app.add_middleware(
@@ -297,7 +321,43 @@ def create_companion(directory: Path, origins: list[str]) -> FastAPI:
 
     @app.get("/health", dependencies=[Depends(authorize)])
     def health():
-        return {"service": "jiraya-local-companion", "version": 1}
+        return {"service": "jiraya-local-companion", "version": 2, "pairing_handoff": True}
+
+    @app.post("/pairing/requests", dependencies=[Depends(authorize)])
+    def request_pairing(body: PairingRequest):
+        try:
+            origin = frontend_origin(body.origin)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        # Only a local client already holding the device token can approve an origin.
+        # The VS Code extension confirms that origin with the user before this call.
+        with state.guard:
+            now = time.monotonic()
+            state.pairings = {key: row for key, row in state.pairings.items() if row["until"] > now}
+            if len(state.pairings) >= 20:
+                raise HTTPException(429, "Too many pending pairing requests")
+            if origin not in origins:
+                origins.append(origin)
+            state.config["origins"] = origins
+            state.save()
+            state.pairings[body.nonce] = {"origin": origin, "until": now + 120}
+        return {"ready": True}
+
+    @app.post("/pairing/claim")
+    def claim_pairing(body: PairingClaim, request: Request):
+        origin = request.headers.get("origin")
+        with state.guard:
+            row = state.pairings.get(body.nonce)
+            if row is None or row["until"] <= time.monotonic():
+                state.pairings.pop(body.nonce, None)
+                raise HTTPException(404, "Pairing is not ready or has expired")
+            if origin != row["origin"]:
+                raise HTTPException(403, "Pairing belongs to another frontend origin")
+            state.pairings.pop(body.nonce)
+            return JSONResponse(
+                {"token": state.config["token"], "service": "jiraya-local-companion"},
+                headers={"Cache-Control": "no-store"},
+            )
 
     @app.post("/workspaces/heartbeat", dependencies=[Depends(authorize)])
     def heartbeat(body: WorkspaceHeartbeat):

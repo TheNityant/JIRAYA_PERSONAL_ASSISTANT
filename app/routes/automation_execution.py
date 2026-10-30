@@ -42,9 +42,16 @@ def run_gmail_automation(
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
     try:
-        return _executor(db).run(
+        executor = _executor(db)
+        message_id = request.message_id
+        if message_id is None:
+            latest = executor.gmail.get_latest_inbox()
+            if latest is None:
+                return {"decision": "NO_MESSAGE", "automation_id": automation.id}
+            message_id = latest.id
+        return executor.run(
             automation=automation,
-            message_id=request.message_id,
+            message_id=message_id,
             force=request.force,
         )
     except RuntimeError as exc:

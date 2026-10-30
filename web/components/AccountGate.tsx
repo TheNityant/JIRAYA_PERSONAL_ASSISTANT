@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, API_BASE, AccountState, ConnectionCatalogItem } from "@/lib/api";
 import AutomationBuilder from "@/components/AutomationBuilder";
+import FirstTimeGuide from "@/components/FirstTimeGuide";
 
 export default function AccountGate() {
   const [account, setAccount] = useState<AccountState | null>(null);
@@ -80,7 +81,7 @@ export default function AccountGate() {
     {account.registration_enabled && <button className="ghost-button" disabled={busy} onClick={() => {setSignup(!signup); setError("");}}>{signup ? "Already have an account? Sign in" : "New to Jiraya? Create account"}</button>}
   </section></main>;
   return <>
-    <div className="account-bar"><span>{account.user?.display_name || "Local workspace"}</span>{account.user && <button disabled={busy} onClick={async () => {setBusy(true); try {await api.logout(); setConnections(null); setAccount({...account, user: null});} catch (e: any) {setError(e.message);} finally {setBusy(false);}}}>Sign out</button>}</div>
+    <div className="account-bar"><span>{account.user?.display_name || "Local workspace"}</span><FirstTimeGuide key={account.user?.id || "local"} accountId={account.user?.id || "local"} connections={connections || []} onWorkspace={()=>setOnboarding(false)}/>{account.user && <button disabled={busy} onClick={async () => {setBusy(true); try {await api.logout(); setConnections(null); setAccount({...account, user: null});} catch (e: any) {setError(e.message);} finally {setBusy(false);}}}>Sign out</button>}</div>
     {error && <p role="alert" className="account-error">{error}</p>}
     {onboarding && connections && account.auth_required ? <main className="account-shell"><section className="account-card setup-card">
       <span className="eyebrow">Set up your workspace</span><h1>Connect your accounts</h1><p>Choose a service and authorize Jiraya on its website. You can connect more accounts later.</p>

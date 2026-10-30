@@ -49,7 +49,20 @@ async function main(){
   for(let i=0;;i++){try{if((await fetch(frontend+'/api/jiraya/auth/me')).ok)break;}catch{}if(i>100)throw Error(logs);await new Promise(r=>setTimeout(r,300));}
   browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
-  await page.goto(frontend);await page.getByRole('button',{name:/Saved email to Calendar/}).click();
+  await page.goto(frontend);
+  const guide=page.getByRole('dialog',{name:'Your services, working together.'});await guide.waitFor();
+  if(process.env.JIRAYA_GUIDE_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_GUIDE_SCREENSHOT});
+  await page.setViewportSize({width:390,height:844});
+  const guideBox=await guide.boundingBox();assert(guideBox.x>=0 && guideBox.x+guideBox.width<=390);
+  await page.keyboard.press('Tab');assert(await guide.evaluate(element=>element.contains(document.activeElement)));
+  if(process.env.JIRAYA_GUIDE_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_GUIDE_MOBILE_SCREENSHOT});
+  await page.setViewportSize({width:1440,height:1000});
+  for(let i=0;i<4;i++)await page.getByRole('button',{name:'Next →',exact:true}).click();
+  await page.getByRole('button',{name:'Open my workspace →',exact:true}).click();
+  assert.equal(await page.evaluate(()=>localStorage.getItem('jiraya.guide.v1:saved-user')),'seen');
+  await page.getByRole('button',{name:'Quick start guide',exact:true}).click();await page.getByRole('dialog').waitFor();
+  await page.getByRole('button',{name:'Close quick start guide',exact:true}).click();
+  await page.getByRole('button',{name:/Saved email to Calendar/}).click();
   assert.equal(await page.getByRole('region',{name:'Automation testing and execution'}).count(),0);
   await page.getByText('Fixture: missing meeting start time',{exact:true}).waitFor();
   if(process.env.JIRAYA_UI_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_UI_SCREENSHOT});
@@ -68,8 +81,8 @@ async function main(){
   await page.getByLabel('Email',{exact:true}).fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fixture-password-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor();await page.getByRole('button',{name:'GitHub',exact:true}).click();
   await panel.getByText('2 open Git projects · 2 enabled',{exact:true}).waitFor();assert.equal(claims,1);
-  user.id='another-user';await page.reload();await page.getByRole('button',{name:'GitHub',exact:true}).click();await panel.getByRole('button',{name:'Connect with VS Code',exact:true}).waitFor();assert.equal(claims,1);
-  await context.close();console.log('PASS: test block removed, saved failure, exact-email retry, approval, refresh, disconnected-account access, handoff, two repositories and pairing retained across logout/login and isolated from another account');
+  user.id='another-user';await page.reload();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('button',{name:'GitHub',exact:true}).click();await panel.getByRole('button',{name:'Connect with VS Code',exact:true}).waitFor();assert.equal(claims,1);
+  await context.close();console.log('PASS: guide steps, completion, replay, per-account memory, keyboard focus, mobile fit, test block removed, saved failure, exact-email retry, approval, refresh, disconnected-account access, handoff, two repositories and pairing retained across logout/login and isolated from another account');
  }finally{
   if(browser)await browser.close();if(server){try{process.kill(-server.pid,'SIGTERM');}catch{}server.stdout.destroy();server.stderr.destroy();server.unref();}
   for(const service of [backend,companion]){service.closeAllConnections();await new Promise(resolve=>service.close(resolve));}

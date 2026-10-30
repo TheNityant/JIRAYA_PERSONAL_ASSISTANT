@@ -95,6 +95,7 @@ async function main() {
     browser = await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.CHROMIUM_EXECUTABLE_PATH} : {})});
     const context = await browser.newContext();
     const page = await context.newPage();
+    await page.addInitScript(()=>localStorage.setItem("jiraya.guide.v1:fixture-user","seen"));
     await page.goto(frontend);
     await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();
     const login = async password => {

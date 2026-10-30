@@ -370,7 +370,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 }
 
 .operations-page.service-page { padding: 0; overflow: hidden; }
-.account-bar button { color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 10px; }
+.account-bar > button { color: var(--muted); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; font-size: 10px; }
 
 .connection-card { flex-wrap: wrap; }
 .connection-copy { flex: 1 1 95px; }
@@ -462,3 +462,28 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 .automation-debug select { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px; max-width: 100%; }
 .automation-debug > label { margin-top: 12px; }
 .debug-controls button { font-size: 11px; }
+
+/* First-visit walkthrough: native modal focus management and an always-available replay. */
+.guide-launch { margin-left: auto; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--soft); padding: 6px 10px; font-size: 12px; }
+.first-time-guide { width: min(780px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #39434c; border-radius: 20px; color: var(--text); background: var(--panel); box-shadow: 0 24px 100px #0008; overflow-y: auto; }
+.first-time-guide::backdrop { background: #030608c9; backdrop-filter: blur(5px); }
+.guide-top { display: flex; justify-content: space-between; align-items: center; padding: 18px 26px; border-bottom: 1px solid var(--border); gap: 10px; }
+.guide-progress { display: flex; gap: 6px; padding: 20px 28px 0; }
+.guide-progress button { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; border: 0; border-bottom: 2px solid var(--border); color: var(--muted); background: transparent; padding: 10px 3px; font-size: 11px; }
+.guide-progress button[aria-current] { color: #d5ebdd; border-color: #8fc8a3; }
+.guide-progress button span { font-size: 10px; }
+.guide-body { padding: 25px 30px; }
+.guide-body h2 { font-size: clamp(24px, 4vw, 32px); line-height: 1.18; letter-spacing: -.035em; margin: 0 0 12px; max-width: 580px; }
+.guide-intro { color: var(--muted); font-size: 14px; line-height: 1.7; margin: 0 0 25px; max-width: 620px; }
+.guide-services, .guide-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.guide-services article, .guide-flow article { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 20px 16px; min-width: 0; }
+.guide-icon { display: flex; align-items: center; margin-bottom: 16px; }
+.guide-icon.gmail { color: #d5a8a0; }.guide-icon.google_calendar { color: #a1bde7; }.guide-icon.github { color: #bcaadd; }
+.guide-body h3 { font-size: 14px; margin: 0 0 8px; }.guide-body article p { font-size: 12px; line-height: 1.65; color: var(--muted); margin: 0; }
+.guide-connected, .guide-neutral { display: block; margin-top: 17px; font-size: 10px; color: var(--muted); }.guide-connected { color: #9cc5a8; }
+.guide-note { margin-top: 22px; padding: 16px 18px; border-left: 2px solid #83ab92; background: #9bbda409; color: var(--soft); font-size: 12px; line-height: 1.8; border-radius: 0 8px 8px 0; }.guide-note strong { color: var(--text); }
+.guide-flow-number { float: right; color: #687380; font-size: 12px; }.guide-flow h3 { margin-top: 18px; }
+.guide-policies { display: grid; gap: 10px; }.guide-policies article { display: flex; gap: 15px; padding: 17px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; }.guide-policies svg { flex: none; color: #a9c7b4; margin-top: 2px; }
+.guide-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 28px 8px; border-top: 1px solid var(--border); }.guide-footer > div { display: flex; gap: 10px; }.guide-footer button { font-size: 12px; }
+.guide-reopen { color: var(--muted); font-size: 10px; margin: 8px 28px 20px; }
+@media (max-width: 560px) { .guide-top { padding: 14px 16px; }.guide-progress { padding: 12px 14px 0; gap: 2px; }.guide-progress button { font-size: 9px; gap: 4px; }.guide-body { padding: 22px 18px; }.guide-services, .guide-flow { grid-template-columns: 1fr; gap: 8px; }.guide-services article, .guide-flow article { padding: 14px; }.guide-icon { float: left; margin: 0 14px 14px 0; }.guide-connected, .guide-neutral { margin-top: 8px; }.guide-flow h3 { margin-top: 8px; }.guide-footer { padding: 16px 14px 8px; }.guide-footer > div { gap: 5px; }.guide-footer button { padding: 9px; font-size: 11px; }.guide-launch { font-size: 10px; } }

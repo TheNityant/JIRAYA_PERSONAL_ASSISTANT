@@ -1,6 +1,7 @@
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,26 @@ from app.services.connection_store import ConnectionStore
 from app.workflows.internship_inquiry import InternshipInquiryWorkflow
 
 router = APIRouter(tags=["gmail", "workflows"])
+
+
+@router.get("/gmail/inbox/recent")
+def recent_inbox(
+    db: Annotated[Session, Depends(get_db)], limit: int = Query(default=10, ge=1, le=20)
+):
+    try:
+        gmail = get_gmail_client(db, get_settings())
+        rows = [
+            gmail.get_message(ident)
+            for ident in gmail.list_message_ids(query="in:inbox", max_results=limit)
+        ]
+        return {"items": [
+            {"id": row.id, "subject": row.subject, "sender": row.sender}
+            for row in sorted(rows, key=lambda row: row.internal_date_ms, reverse=True)
+        ]}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Could not load inbox messages: {type(exc).__name__}"
+        ) from exc
 
 
 class InternshipWorkflowRequest(BaseModel):

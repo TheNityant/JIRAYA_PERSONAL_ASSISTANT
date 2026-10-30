@@ -32,6 +32,23 @@ Record: case ID, rule ID, execution ID(s), local timestamp, approval policy,
 expected result, actual result, provider object URL, and sanitized stage/reason code.
 Never include credentials, cookies, pairing tokens, or OAuth callback query strings.
 
+## Find and debug an existing automation
+
+Open **Automations** and select the saved rule in the left sidebar. The **Test and
+execution** panel sits directly below its title. Save changes before testing.
+
+- **Choose inbox email** loads recent inbox subjects/senders; select the exact test
+  message so another incoming email cannot change your test target.
+- **Debug · Test match** previews without writing. The preview pins that message for
+  **Debug · Run selected email**. Run respects the saved approval policy.
+- **Saved executions** restores background results after refresh/sign-in. For a
+  failed Calendar execution, record its stage, reason code and reason text.
+- **Retry this email** re-evaluates that failed message after fixing its defaults or
+  connection. Repeated ordinary runs may return the previously saved execution.
+  A completed provider write should be checked before taking any manual action.
+- If no background execution appears but a manual run succeeds, inspect runtime
+  status and hosting uptime. A manual pass does not prove unattended monitoring.
+
 ## A. Gmail → Calendar event: C01–C06
 
 Create a Gmail / New email rule with **Create calendar event**. Set **Default
@@ -104,7 +121,7 @@ is acceptable. Inventing a date, midnight start, or all-day event is a failure.
 
 ### C06 — Reprocessing does not create a duplicate
 
-After C01 succeeds, refresh the app and let it poll again. Run Debug Run Latest on
+After C01 succeeds, refresh the app and let it poll again. Select the same email and use Debug · Run selected email on
 that same source email without forcing a new execution.
 
 Expected: the existing execution is reported and Calendar still has exactly one

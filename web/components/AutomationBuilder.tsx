@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import {
   api,
   Automation,
+  AutomationExecution,
   AutomationInput,
   AutomationRunResponse,
   ConnectionCatalogItem,
@@ -87,7 +88,7 @@ function notificationIcon(category: string): string {
   }
 }
 
-export default function AutomationBuilder() {
+export default function AutomationBuilder({accountId = "local"}: {accountId?: string}) {
   const [activeView, setActiveView] = useState<View>("AUTOMATIONS");
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [selected, setSelected] = useState<Automation | null>(null);
@@ -110,13 +111,19 @@ export default function AutomationBuilder() {
   const [obligationFilter, setObligationFilter] = useState<"OPEN" | "RESOLVED">("OPEN");
   const [runtime, setRuntime] = useState<GmailRuntimeStatus | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [debugMessageId, setDebugMessageId] = useState("");
+  const [debugBusy, setDebugBusy] = useState(false);
+  const [debugError, setDebugError] = useState("");
+  const [history, setHistory] = useState<AutomationExecution[]>([]);
+  const [inbox, setInbox] = useState<Array<{id: string; subject: string; sender: string}>>([]);
   const canSave = routeReady(draft, connections);
   const allowedActions = actionsFor(draft.source, connections);
 
   async function refresh(preferredId?: string) {
     const list = await api.listAutomations();
     setAutomations(list);
-    const next = list.find((item) => item.id === preferredId) ?? list[0] ?? null;
+    const remembered = preferredId || localStorage.getItem(`jiraya.automation:${accountId}`);
+    const next = list.find((item) => item.id === remembered) ?? list[0] ?? null;
     selectAutomation(next);
     setStatus(list.length ? "Ready" : "Create your first automation");
   }
@@ -142,6 +149,29 @@ export default function AutomationBuilder() {
     setObligations(obligationResponse);
     setRuntime(runtimeResponse);
   }
+
+  useEffect(() => {
+    if (!selected || activeView !== "AUTOMATIONS") return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const rows = await api.listExecutions(selected.id);
+        if (cancelled) return;
+        setHistory(rows);
+        const latest = rows.find(row => !debugMessageId || row.source_event_id === debugMessageId);
+        if (latest) {
+          setRunResult(current => {
+            const updated = current?.execution && rows.find(row => row.id === current.execution?.id);
+            return updated ? {...current, execution: updated} : current || {decision: latest.status, execution: latest};
+          });
+          setExecutionDraft(current => current || latest.draft_body);
+        }
+      } catch (error: any) {if (!cancelled) setDebugError(`Could not load saved executions: ${error.message}`);}
+    };
+    void load();
+    const timer = window.setInterval(load, 10000);
+    return () => {cancelled = true;window.clearInterval(timer);};
+  }, [selected?.id, activeView, debugMessageId]);
 
   useEffect(() => {
     const loaded = Promise.all([refresh(), refreshConnections(), refreshOperations()]);
@@ -181,6 +211,8 @@ export default function AutomationBuilder() {
   function selectAutomation(item: Automation | null) {
     setConfigurationError(""); setSyncNotice(null);
     setSelected(item);
+    if (item) localStorage.setItem(`jiraya.automation:${accountId}`, item.id);
+    setDebugMessageId(""); setDebugError(""); setHistory([]);
     setPreview(null);
     setRunResult(null);
     setExecutionDraft("");
@@ -289,19 +321,22 @@ export default function AutomationBuilder() {
   }
 
   async function testLatestEmail() {
-    if (!selected || selected.source !== "gmail") return;
+    if (!selected || selected.source !== "gmail" || debugBusy) return;
+    setDebugBusy(true); setDebugError("");
     setStatus("Debug: testing latest Gmail...");
     try {
-      const result = await api.previewGmail(selected.id);
+      const result = await api.previewGmail(selected.id, debugMessageId || undefined);
       setPreview(result);
+      if (result.message?.id) setDebugMessageId(result.message.id);
       setStatus(result.match?.matches ? "Latest email matched" : "Latest email did not match");
     } catch (error: any) {
-      setStatus(`Preview failed: ${error.message}`);
+      setStatus(`Preview failed: ${error.message}`); setDebugError(error.message);
     }
+    finally {setDebugBusy(false);}
   }
 
   async function runLatestEmail(force = false, messageId?: string) {
-    if (!selected || isSyncing) return;
+    if (!selected || isSyncing || debugBusy) return;
     if (selected.source === "github") {
       setIsSyncing(true); setSyncNotice(null);
       try {
@@ -322,16 +357,18 @@ export default function AutomationBuilder() {
       } catch (error: any) { setStatus(`Calendar sync failed: ${error.message}`); }
       return;
     }
-    setStatus("Debug: running automation on latest Gmail...");
+    setDebugBusy(true); setDebugError("");
+    setStatus("Debug: running automation on selected Gmail...");
     try {
-      const result = await api.runGmailAutomation(selected.id, messageId, force);
+      const result = await api.runGmailAutomation(selected.id, messageId || debugMessageId || undefined, force);
       setRunResult(result);
       setExecutionDraft(result.execution?.draft_body ?? "");
       setStatus(`Execution: ${nice(result.decision)}`);
       await refreshOperations();
     } catch (error: any) {
-      setStatus(`Execution failed: ${error.message}`);
+      setStatus(`Execution failed: ${error.message}`); setDebugError(error.message);
     }
+    finally {setDebugBusy(false);}
   }
 
   async function approveExecution() {
@@ -503,12 +540,26 @@ export default function AutomationBuilder() {
               </div>
               <div className="topbar-actions">
                 {selected && <button className="secondary-button" onClick={() => beginAutomation()}>New automation</button>}
-                {selected?.source === "gmail" && <button className="ghost-button" onClick={testLatestEmail}>Debug · Test match</button>}
-                {selected && <button className="ghost-button" disabled={isSyncing} onClick={() => runLatestEmail(false)}>{selected.source === "gmail" ? "Debug · Run latest" : selected.source === "github" ? "Sync GitHub" : "Sync Calendar"}</button>}
+                {selected && selected.source !== "gmail" && <button className="ghost-button" disabled={isSyncing} onClick={() => runLatestEmail(false)}>{selected.source === "github" ? "Sync GitHub" : "Sync Calendar"}</button>}
                 <button className="secondary-button configuration-toggle" onClick={() => setInspectorOpen(!inspectorOpen)} aria-expanded={inspectorOpen}>Configure</button>
                 <button className="primary-button" onClick={save} disabled={isSaving || !canSave}>{isSaving ? "Saving..." : selected ? "Save changes" : "Create automation"}</button>
               </div>
             </header>
+
+            <section className="automation-debug" aria-label="Automation testing and execution">
+              <div><strong>Test and execution</strong><p>{!selected ? "Save this automation to enable testing." : isDirty ? "Save your changes first. Tests use the saved configuration." : "Preview a match, run an email, or reopen an execution saved by the background monitor."}</p></div>
+              {draft.source === "gmail" && <>
+                <div className="debug-controls">
+                  <label>Source email<select aria-label="Debug source email" value={debugMessageId} onChange={event => {setDebugMessageId(event.target.value);setPreview(null);setRunResult(null);setExecutionDraft("");}}><option value="">Newest inbox email</option>{debugMessageId && !inbox.some(item => item.id === debugMessageId) && <option value={debugMessageId}>{preview?.message?.subject || `Message ${debugMessageId}`}</option>}{inbox.map(item => <option key={item.id} value={item.id}>{item.subject} · {item.sender}</option>)}</select></label>
+                  <button className="secondary-button" disabled={!selected || debugBusy} onClick={async () => {try {setInbox((await api.recentInbox()).items);setDebugError("");} catch (error: any) {setDebugError(error.message);}}}>Choose inbox email</button>
+                  <button className="secondary-button" disabled={!selected || isDirty || debugBusy} onClick={testLatestEmail}>Debug · Test match</button>
+                  <button className="primary-button" disabled={!selected || isDirty || debugBusy} onClick={() => runLatestEmail(false)}>{debugBusy ? "Testing…" : debugMessageId ? "Debug · Run selected email" : "Debug · Run latest"}</button>
+                </div>
+                <p>Run follows the saved approval policy. Automatic can write immediately; Ask before action waits for approval.</p>
+              </>}
+              {!!history.length && <label>Saved executions<select aria-label="Saved executions" value={runResult?.execution?.id || ""} onChange={event => {const row = history.find(item => item.id === event.target.value);if (row) {setRunResult({decision: row.status, execution: row});setExecutionDraft(row.draft_body);}}}><option value="" disabled>Select an execution</option>{history.map(row => <option key={row.id} value={row.id}>{nice(row.status)} · {when(row.created_at)} · {row.source_event_id}</option>)}</select></label>}
+              {debugError && <p role="alert" className="service-alert">{debugError}</p>}
+            </section>
 
             {syncNotice && <div className={`sync-notice ${syncNotice.error ? "error" : ""}`} role={syncNotice.error ? "alert" : "status"}>{syncNotice.message}</div>}
             <AutomationCanvas draft={draft} connections={connections} onSource={selectSource} onAction={(action) => updateAction("type", action)}/>
@@ -526,6 +577,10 @@ export default function AutomationBuilder() {
                   <div><span className="small-label">Automation execution</span><strong>{nice(runResult.decision)}</strong></div>
                   {runResult.match && <span className="execution-confidence">{Math.round(runResult.match.confidence * 100)}% match</span>}
                 </div>
+                {runResult.reason && <p role="status">{runResult.reason}</p>}
+                {runResult.decision === "NO_MESSAGE" && <p>No inbox email was found. Send a new test email or choose an existing inbox email above.</p>}
+                {runResult.match && !runResult.match.matches && <p>{runResult.match.reason}</p>}
+                {execution && <p className="form-note">Source email: {execution.source_event_id} · Saved status: {nice(execution.status)}</p>}
                 {runResult.action_route && <div className="route-note"><strong>{nice(runResult.action_route.decision)}</strong><span>{runResult.action_route.reason}</span></div>}
                 {execution?.action_type === "DRAFT_REPLY" && str(execution.output.reason) && <p className="service-alert" role="alert">{str(execution.output.reason)}</p>}
                 {execution?.action_type === "DRAFT_REPLY" && !executionDraft && !execution.output.calendar_booking && runResult.decision === "EXISTING_EXECUTION" && <button className="secondary-button" onClick={() => runLatestEmail(true, execution.source_event_id)}>Regenerate draft</button>}
@@ -624,7 +679,7 @@ export default function AutomationBuilder() {
         </>
       ) : (
         <section className={`operations-page ${["GITHUB", "CALENDAR"].includes(activeView) ? "service-page" : ""}`}>
-          {activeView === "GITHUB" ? <GitHubWorkspace onCreateAutomation={(repository, trigger) => beginAutomation("github", repository, trigger)} /> : activeView === "CALENDAR" ? <CalendarWorkspace onCreateAutomation={() => beginAutomation("google_calendar")} /> : activeView === "NOTIFICATIONS" ? (
+          {activeView === "GITHUB" ? <GitHubWorkspace accountId={accountId} onCreateAutomation={(repository, trigger) => beginAutomation("github", repository, trigger)} /> : activeView === "CALENDAR" ? <CalendarWorkspace onCreateAutomation={() => beginAutomation("google_calendar")} /> : activeView === "NOTIFICATIONS" ? (
             <>
               <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>“Needs you” means you have work to review. “Done by Jiraya” is a completed automatic action. FYI is informational. State changes explain obligation lifecycle updates.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
               <div className="filter-tabs">

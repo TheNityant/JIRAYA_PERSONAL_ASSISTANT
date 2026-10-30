@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const http = require('node:http');
 const {randomUUID} = require('node:crypto');
 const path = require('node:path');
+const {createManager} = require('./managed-companion');
 let timer, pending, session, context, output, status, lastStatus, gitApi;
 
 function localProjectFolders() {
@@ -68,6 +69,18 @@ function activate(extensionContext) {
   status.command='jiraya.diagnose';status.show();
   context.subscriptions.push(output,status);
   const report=()=>heartbeat().catch(error=>reportStatus(error.message,true));
+  const manager=createManager(vscode,context,call);
+  if(vscode.window.registerUriHandler) context.subscriptions.push(vscode.window.registerUriHandler({handleUri:uri=>manager.connect(uri).then(report)}));
+  context.subscriptions.push(vscode.commands.registerCommand('jiraya.setupCompanion',async()=>{
+    try {await manager.reset();await manager.setup();await manager.start();await heartbeat();vscode.window.showInformationMessage('Jiraya local helper is ready. Use Connect with VS Code on your Jiraya website.');}
+    catch(error){vscode.window.showErrorMessage(`Jiraya helper setup: ${error.code ? 'Check Python 3.12+ and internet access, then retry.' : error.message}`);}
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand('jiraya.stopCompanion',async()=>{
+    try {await manager.stop();reportStatus('Local helper stopped');}
+    catch(error){vscode.window.showErrorMessage(`Jiraya: ${error.message}`);}
+  }));
+  if(manager.configured() && vscode.workspace.isTrusted && !vscode.env?.remoteName)
+    manager.start().then(report).catch(error=>reportStatus(error.message,true));
   const gitExtension=vscode.extensions?.getExtension('vscode.git');
   if(gitExtension) {
     Promise.resolve(gitExtension.activate()).then(extension=>{

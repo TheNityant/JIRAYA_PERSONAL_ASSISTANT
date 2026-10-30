@@ -453,3 +453,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 .scheduling-weekdays { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
 .scheduling-weekdays label { display: flex; align-items: center; gap: 4px; font-size: 10px; }
 .scheduling-weekdays input { width: 14px; height: 14px; }
+
+.automation-debug { flex: none; padding: 16px 22px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.automation-debug strong { font-size: 13px; }
+.automation-debug p { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 6px 0 10px; }
+.debug-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.automation-debug label { display: grid; gap: 6px; font-size: 11px; color: var(--muted); min-width: 0; flex: 1; }
+.automation-debug select { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px; max-width: 100%; }
+.automation-debug > label { margin-top: 12px; }
+.debug-controls button { font-size: 11px; }

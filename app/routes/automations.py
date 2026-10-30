@@ -235,7 +235,7 @@ def preview_gmail_match(
         message = (
             gmail.get_message(request.message_id)
             if request.message_id
-            else gmail.get_latest_unread_inbox()
+            else gmail.get_latest_inbox()
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Gmail unavailable: {type(exc).__name__}") from exc

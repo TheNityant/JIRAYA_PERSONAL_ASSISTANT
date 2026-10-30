@@ -7,7 +7,9 @@ type Project = {id: string; path: string; repository?: string; branch?: string; 
 type Result = {id: string; repository: string; branch: string; status: string; commit?: string; files?: number; detail?: string; remaining_files?: number; remaining_commits?: number};
 type Job = {id: string; status: string; message?: string; results: Result[]};
 
-export default function WorkspaceCheckpoint() {
+export default function WorkspaceCheckpoint({accountId = "local"}: {accountId?: string}) {
+  const storageKey = `jiraya.companion:${accountId}`;
+  const pendingKey = `jiraya.companion.pending:${accountId}`;
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [port, setPort] = useState("8765");
@@ -22,6 +24,7 @@ export default function WorkspaceCheckpoint() {
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const [message, setMessage] = useState("Jiraya workspace checkpoint");
+  const [pendingPair, setPendingPair] = useState<{nonce: string; port: string; started: number} | null>(null);
   const running = job?.status === "RUNNING";
 
   async function call<T>(path: string, method = "GET", body?: unknown, credentials = {token, port}): Promise<T> {
@@ -29,7 +32,8 @@ export default function WorkspaceCheckpoint() {
     if (!pairingToken) throw Error("Enter the pairing token printed by the local companion.");
     const parsed = Number(credentials.port);
     if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) throw Error("Enter a local port from 1024 to 65535.");
-    const response = await fetch(`http://127.0.0.1:${parsed}${path}`, {method, cache: "no-store", signal: AbortSignal.timeout(10000), headers: {Authorization: `Bearer ${pairingToken}`, "Content-Type": "application/json"}, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
+    const options: RequestInit & {targetAddressSpace: string} = {method, cache: "no-store", targetAddressSpace: "loopback", signal: AbortSignal.timeout(10000), headers: {Authorization: `Bearer ${pairingToken}`, "Content-Type": "application/json"}, ...(body === undefined ? {} : {body: JSON.stringify(body)})};
+    const response = await fetch(`http://127.0.0.1:${parsed}${path}`, options);
     const result = await response.json();
     if (response.status === 401) throw Error("The companion is reachable but rejected the submitted token. Check the visible token against the running companion terminal.");
     if (!response.ok) throw Error(typeof result.detail === "string" ? result.detail : "The companion rejected this request. Check the project settings.");
@@ -37,9 +41,48 @@ export default function WorkspaceCheckpoint() {
   }
 
   useEffect(() => {
-    const saved = localStorage.getItem("jiraya.companion");
-    if (saved) {try {const value = JSON.parse(saved);setToken(value.token);setPort(value.port);setPaired(true);} catch {localStorage.removeItem("jiraya.companion");}}
-  }, []);
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {try {const value = JSON.parse(saved);setToken(value.token);setPort(value.port);setPaired(true);} catch {localStorage.removeItem(storageKey);}}
+    const pending = sessionStorage.getItem(pendingKey);
+    if (pending) {try {setPendingPair(JSON.parse(pending));} catch {sessionStorage.removeItem(pendingKey);}}
+  }, [storageKey, pendingKey]);
+
+  useEffect(() => {
+    if (!pendingPair) return;
+    let cancelled = false;
+    let waiting = false;
+    const attempt = async () => {
+      if (waiting) return;
+      if (Date.now() - pendingPair.started > 300000) {
+        setError("Pairing timed out. Finish VS Code setup, then choose Connect with VS Code again.");
+        sessionStorage.removeItem(pendingKey);setPendingPair(null);return;
+      }
+      waiting = true;
+      try {
+        const options: RequestInit & {targetAddressSpace: string} = {method:"POST",targetAddressSpace:"loopback",cache:"no-store",signal:AbortSignal.timeout(5000),headers:{"Content-Type":"application/json"},body:JSON.stringify({nonce:pendingPair.nonce})};
+        const response = await fetch(`http://127.0.0.1:${Number(pendingPair.port)}/pairing/claim`,options);
+        if (!response.ok || cancelled) return;
+        const claimed = await response.json();
+        if (claimed.service !== "jiraya-local-companion" || !claimed.token) throw Error("Unexpected device pairing response.");
+        const saved = {token:claimed.token,port:pendingPair.port};
+        localStorage.setItem(storageKey,JSON.stringify(saved));sessionStorage.removeItem(pendingKey);
+        setToken(saved.token);setPort(saved.port);setPaired(true);setOnline(true);setPendingPair(null);setError("");setRevision(v=>v+1);
+      } catch { /* The helper may be installing or waiting for local-network permission. */ }
+      finally {waiting=false;}
+    };
+    void attempt();const timer=window.setInterval(attempt,1500);
+    return ()=>{cancelled=true;window.clearInterval(timer);};
+  },[pendingPair,pendingKey,storageKey]);
+
+  function connectWithEditor() {
+    const parsed=Number(port);
+    if (!Number.isInteger(parsed) || parsed<1024 || parsed>65535) {setError("Use a local port from 1024 to 65535.");return;}
+    const nonce=Array.from(crypto.getRandomValues(new Uint8Array(32)),value=>value.toString(16).padStart(2,"0")).join("");
+    const pending={nonce,port:String(parsed),started:Date.now()};
+    sessionStorage.setItem(pendingKey,JSON.stringify(pending));setPendingPair(pending);setError("");
+    const query=new URLSearchParams({origin:window.location.origin,nonce,port:String(parsed)});
+    window.location.assign(`vscode://jiraya-local.jiraya-workspace/connect?${query}`);
+  }
   useEffect(() => {
     if (!paired) return;
     let cancelled = false;
@@ -65,7 +108,7 @@ export default function WorkspaceCheckpoint() {
     try {
       const health = await call<{service: string}>("/health", "GET", undefined, credentials);
       if (health.service !== "jiraya-local-companion") throw Error("This is not a Jiraya companion.");
-      localStorage.setItem("jiraya.companion", JSON.stringify(credentials));setConnectionError("");setShowToken(false);setPaired(true);setOnline(true);setRevision((v) => v+1);
+      localStorage.setItem(storageKey, JSON.stringify(credentials));setConnectionError("");setShowToken(false);setPaired(true);setOnline(true);setRevision((v) => v+1);
     } catch (e: any) {setError(e.message || "Could not connect to the local companion.");}
     finally {setBusy(false);}
   }
@@ -87,10 +130,10 @@ export default function WorkspaceCheckpoint() {
   }
   return <section className="checkpoint-panel" aria-label="Local workspace checkpoint">
     <div className="checkpoint-header"><div><span className="eyebrow">Developer workspace · this computer</span><h2>Finish the day. Push your open projects.</h2><p>Commit saved changes and push enabled repositories to their configured branches using local Git.</p></div><span className={`state-badge ${online ? "open" : "warning"}`}>{online ? "Companion connected" : "Companion offline"}</span></div>
-    {connectionError && paired && <div className="service-alert" role="alert">{connectionError}. Check that the companion is running and browser local-network access is allowed.</div>}
+    {connectionError && paired && <div className="service-alert" role="alert">{connectionError}. Open VS Code and allow this site's local-network permission. Your saved pairing and project policies are still retained. <button className="secondary-button" onClick={connectWithEditor}>Open VS Code to reconnect</button></div>}
     {error && <div className="service-alert" role="alert">{error}</div>}
-    {!paired ? <div className="checkpoint-setup"><div><strong>Connect your local companion once</strong><p>Run <code>python -m app.local_companion serve</code> from your Jiraya installation, pair the VS Code extension, then paste the printed token here. Your local Git credentials stay on this computer.</p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/blob/phase2e-generic-execution/docs/WORKSPACE_CHECKPOINT.md" target="_blank" rel="noreferrer">Setup instructions ↗</a></div><form onSubmit={pair}><label>Pairing token<input name="companionToken" type={showToken ? "text" : "password"} required autoComplete="off" autoCapitalize="none" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)}/></label><label>Local port<input name="companionPort" inputMode="numeric" required value={port} onChange={(e) => setPort(e.target.value)}/></label><label className="checkpoint-token-visibility"><input type="checkbox" checked={showToken} onChange={(e) => setShowToken(e.target.checked)}/>Show pairing token</label><button className="secondary-button" disabled={busy}>Connect companion</button></form></div> : <>
-      <div className="checkpoint-toolbar"><span>{projects.length} open Git projects · {projects.filter((p) => p.enabled).length} enabled</span><div><button className="ghost-button" disabled={busy} onClick={() => setRevision((v) => v+1)}>Refresh projects</button><button className="ghost-button" disabled={busy || running} onClick={() => {localStorage.removeItem("jiraya.companion");setPaired(false);setOnline(false);setProjects([]);setRegistration(null);setJob(null);}}>Forget pairing</button></div></div>
+    {!paired ? <div className="checkpoint-setup"><div><strong>Connect this computer once</strong><p>Install the Jiraya VS Code extension, then connect below. VS Code starts the local helper and remembers its settings. Your pairing is saved for this Jiraya account in this browser; signing out does not remove it.</p><p>Python 3.12+ and Git are needed on this computer. The website uses your local helper to access local projects.</p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/raw/refs/heads/phase2e-generic-execution/extensions/jiraya-workspace/jiraya-workspace-0.4.0.vsix" target="_blank" rel="noreferrer">Download VS Code extension ↗</a><p>In VS Code: Extensions → ⋯ → Install from VSIX. Install once, then reload your project windows.</p><button className="primary-button" onClick={connectWithEditor}>{pendingPair ? "Open VS Code again" : "Connect with VS Code"}</button>{pendingPair && <p role="status">Approve this website in VS Code, complete the one-time helper setup, allow local-network access in the browser, then return here. Waiting for this computer…</p>}<p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/blob/phase2e-generic-execution/docs/WORKSPACE_CHECKPOINT.md" target="_blank" rel="noreferrer">Setup help ↗</a></p></div><details><summary>Manual pairing / custom port</summary><form onSubmit={pair}><label>Pairing token<input name="companionToken" type={showToken ? "text" : "password"} required autoComplete="off" autoCapitalize="none" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)}/></label><label>Local port<input name="companionPort" inputMode="numeric" required value={port} onChange={(e) => setPort(e.target.value)}/></label><label className="checkpoint-token-visibility"><input type="checkbox" checked={showToken} onChange={(e) => setShowToken(e.target.checked)}/>Show pairing token</label><button className="secondary-button" disabled={busy}>Connect companion</button></form></details></div> : <>
+      <div className="checkpoint-toolbar"><span>{projects.length} open Git projects · {projects.filter((p) => p.enabled).length} enabled</span><div><button className="ghost-button" disabled={busy} onClick={() => setRevision((v) => v+1)}>Refresh projects</button><button className="ghost-button" disabled={busy || running} onClick={() => {localStorage.removeItem(storageKey);setPaired(false);setOnline(false);setProjects([]);setRegistration(null);setJob(null);}}>Forget pairing</button></div></div>
       {registration ? <div className="checkpoint-registration" aria-label="Workspace registration">
         <p className="checkpoint-note">{registration.session_count} registered editor or terminal sessions · registration expires after 45 seconds without a heartbeat.</p>
         {!registration.session_count && <p className="checkpoint-note">Browser pairing is complete. No editor has registered yet. In VS Code, open your repository folder and run <strong>Jiraya: Show Workspace Diagnostics</strong>. Other IDEs can use the companion’s <code>watch</code> command.</p>}

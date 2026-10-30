@@ -193,6 +193,7 @@ export type Account = {id: string; email: string; display_name: string};
 export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
 
 export const api = {
+  recentInbox: () => request<{items: Array<{id: string; subject: string; sender: string}>}>("/gmail/inbox/recent"),
   developerBriefingStatus: () => request<{configured: boolean; message: string}>("/github/briefing/status"),
   createDeveloperBriefing: (repositories: string[]) => request<DeveloperBriefingResult>("/github/briefing", {method: "POST", signal: AbortSignal.timeout(180000), body: JSON.stringify({repositories})}),
   account: () => request<AccountState>("/auth/me"),

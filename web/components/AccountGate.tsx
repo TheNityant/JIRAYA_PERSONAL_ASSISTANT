@@ -26,9 +26,9 @@ export default function AccountGate() {
       }
       setError("");
       if (state.user || !state.auth_required) {
-        const result = await api.listConnections();
+        const [result, savedRules] = await Promise.all([api.listConnections(), api.listAutomations()]);
         setConnections(result.catalog);
-        setOnboarding(!result.catalog.some((item) => item.status === "CONNECTED"));
+        setOnboarding(!savedRules.length && !result.catalog.some((item) => item.status === "CONNECTED"));
       }
     } catch (e: any) { setError(e.message); }
   }
@@ -86,6 +86,6 @@ export default function AccountGate() {
       <span className="eyebrow">Set up your workspace</span><h1>Connect your accounts</h1><p>Choose a service and authorize Jiraya on its website. You can connect more accounts later.</p>
       {connections.map((item) => <article className="connection-card" key={item.id}><div className="connection-copy"><strong>{item.label}</strong><span>{item.status === "SETUP_REQUIRED" ? "This connection has not been enabled by the app owner yet." : item.account || item.description}</span></div><button disabled={busy || item.status !== "AVAILABLE"} onClick={() => connect(item)}>{item.status === "CONNECTED" ? "Connected" : item.status === "SETUP_REQUIRED" ? "Unavailable" : "Connect"}</button></article>)}
       <button className="primary-button" onClick={() => setOnboarding(false)}>Continue to workspace</button>
-    </section></main> : <AutomationBuilder />}
+    </section></main> : <AutomationBuilder accountId={account.user?.id || "local"} />}
   </>;
 }

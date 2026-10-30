@@ -19,7 +19,7 @@ function windowContext(port, folder, dirty=false, trusted=true, options={}) {
  vscode.workspace.updateWorkspaceFolders=(index,remove,...folders)=>{additions.push(...folders);vscode.workspace.workspaceFolders.splice(index,remove,...folders);handlers.folders();return true;};
  const context={subscriptions:[],secrets:{onDidChange:subscribe('secret'),get:async()=>stored,store:async(...args)=>{secretCalls.push(args);stored=args[1];}}};
  const module={exports:{}};
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension.js'),'utf8'),{require:name=>name==='vscode'?vscode:require(name),module,Buffer,setInterval:()=>1,clearInterval(){},setTimeout,clearTimeout});
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../extension.js'),'utf8'),{require:name=>name==='vscode'?vscode:name.startsWith('./')?require(path.join(__dirname,'..',name)):require(name),module,Buffer,setInterval:()=>1,clearInterval(){},setTimeout,clearTimeout});
  module.exports.activate(context);
  return {api:module.exports,commands,secretCalls,status,messages,lines,handlers,additions,git};
 }

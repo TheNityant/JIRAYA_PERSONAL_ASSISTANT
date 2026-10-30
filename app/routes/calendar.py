@@ -15,6 +15,7 @@ from app.integrations.calendar.oauth import GOOGLE_CALENDAR_SCOPES, build_calend
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
 from app.services.runtime_state_store import RuntimeStateStore
+from app.runtime.status import monitor_status
 
 router = APIRouter(tags=["calendar"])
 
@@ -210,7 +211,11 @@ def calendar_status(db: Session = Depends(get_db)) -> dict:
         "scopes": list(connection.scopes or []) if connection else [],
         "oauth_configured": bool(settings.google_oauth_client_id and settings.google_oauth_client_secret),
         "health": health,
-        "monitor": RuntimeStateStore(db).get(f"calendar-monitor-health:{settings.dev_user_id}") or {},
+        "monitor": monitor_status(
+            RuntimeStateStore(db).get(f"calendar-monitor-health:{settings.dev_user_id}") or {},
+            enabled=settings.calendar_background_monitor_enabled,
+            poll_seconds=settings.calendar_background_poll_seconds,
+        ),
         "background_monitor_configured": settings.calendar_background_monitor_enabled,
         "poll_seconds": settings.calendar_background_poll_seconds,
     }

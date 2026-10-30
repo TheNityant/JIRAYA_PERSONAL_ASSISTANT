@@ -269,6 +269,10 @@ class GmailRuntimeService:
         }
 
     def process_message(self, message: GmailMessage) -> dict:
+        sent = "SENT" in message.labels
+        # Self-addressed mail has both labels. It may trigger independent actions,
+        # but never an automatic reply back to the same mailbox.
+        incoming = not sent or "INBOX" in message.labels
         action = self.actions.latest_verified_for_thread(message.thread_id)
         if action is not None and message.id != (action.context or {}).get("source_message_id"):
             batch = self._reconcile_thread(action.id)
@@ -279,9 +283,11 @@ class GmailRuntimeService:
             # Scheduling replies must also process new proposals in an existing thread.
             independent_results = []
             scheduling_claimed = False
-            if "SENT" not in message.labels:
+            if incoming:
                 for automation in self.automations.list(source="gmail", enabled=True):
                     action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
+                    if sent and action_type == "DRAFT_REPLY":
+                        continue  # Never start an automatic self-reply loop.
                     scheduling_config = (automation.action_config or {}).get("calendar_scheduling") or {}
                     scheduling_reply = action_type == "DRAFT_REPLY" and isinstance(scheduling_config, dict) and scheduling_config.get("enabled")
                     if scheduling_reply and scheduling_claimed:
@@ -301,7 +307,7 @@ class GmailRuntimeService:
                 "reconciliation_results": batch,
             }
 
-        if "SENT" in message.labels:
+        if not incoming:
             return {
                 "message_id": message.id,
                 "thread_id": message.thread_id,
@@ -312,7 +318,7 @@ class GmailRuntimeService:
         reply_claimed = False
         for automation in self.automations.list(source="gmail", enabled=True):
             action_type = str((automation.action_config or {}).get("type") or "DRAFT_REPLY").upper()
-            if action_type == "DRAFT_REPLY" and reply_claimed:
+            if action_type == "DRAFT_REPLY" and (reply_claimed or sent):
                 continue
 
             result = self.executor.run(automation=automation, message_id=message.id)

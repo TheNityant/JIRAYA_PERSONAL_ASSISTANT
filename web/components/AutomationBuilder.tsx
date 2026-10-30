@@ -549,6 +549,8 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
             <section className="automation-debug" aria-label="Automation testing and execution">
               <div><strong>Test and execution</strong><p>{!selected ? "Save this automation to enable testing." : isDirty ? "Save your changes first. Tests use the saved configuration." : "Preview a match, run an email, or reopen an execution saved by the background monitor."}</p></div>
               {draft.source === "gmail" && <>
+                <p aria-label="Background Gmail monitoring">{runtime?.background_monitor_enabled ? `Automatic monitoring is active. Checks run every ${runtime.poll_seconds}s, with processing time in addition.` : runtime?.background_monitor_configured ? "Automatic monitoring needs attention. Check the Runtime status and connection." : "Automatic monitoring is paused. Debug runs do not enable it."}{runtime?.last_poll_at ? ` Last completed check: ${when(runtime.last_poll_at)}.` : ""}{selected && !selected.enabled ? " This automation is disabled." : ""}</p>
+                <p>Saved changes apply to new emails. To test an email already received, choose it below.</p>
                 <div className="debug-controls">
                   <label>Source email<select aria-label="Debug source email" value={debugMessageId} onChange={event => {setDebugMessageId(event.target.value);setPreview(null);setRunResult(null);setExecutionDraft("");}}><option value="">Newest inbox email</option>{debugMessageId && !inbox.some(item => item.id === debugMessageId) && <option value={debugMessageId}>{preview?.message?.subject || `Message ${debugMessageId}`}</option>}{inbox.map(item => <option key={item.id} value={item.id}>{item.subject} · {item.sender}</option>)}</select></label>
                   <button className="secondary-button" disabled={!selected || debugBusy} onClick={async () => {try {setInbox((await api.recentInbox()).items);setDebugError("");} catch (error: any) {setDebugError(error.message);}}}>Choose inbox email</button>
@@ -622,6 +624,7 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
                       <p>{str((execution.output.proposal as Record<string, unknown>).description)}</p>
                     </> : <p>{str(execution.output.reason)}</p>}
                     {Boolean(execution.output.reason) && Boolean(execution.output.proposal) && <p role="alert">{str(execution.output.reason)}</p>}
+                    {Array.isArray(execution.output.source_links) && execution.output.source_links.filter((url): url is string => typeof url === "string" && /^https?:\/\//i.test(url)).map((url, index) => <p key={url}><a className="service-link" href={url} target="_blank" rel="noreferrer">{execution.output.source_links instanceof Array && execution.output.source_links.length === 1 ? "Meeting / source link ↗" : `Source link ${index + 1} ↗`}</a></p>)}
                     {approvable && <button className="primary-button" onClick={approveExecution}>Approve &amp; Create event</button>}
                     {execution.status === "VERIFIED_SUCCESS" && <p>Created and verified in Calendar.</p>}
                     {execution.status === "DRAFT_READY" && <p>Draft only: no event will be created.</p>}

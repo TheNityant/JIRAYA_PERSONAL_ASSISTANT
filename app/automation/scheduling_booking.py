@@ -6,6 +6,7 @@ from datetime import datetime
 from googleapiclient.errors import HttpError
 
 from app.automation.calendar_action import CalendarProposal
+from app.automation.calendar_links import calendar_link_details, links_verified
 from app.automation.scheduling_reply import SchedulingReview, recheck
 from app.integrations.calendar.connection import get_calendar_client
 
@@ -14,9 +15,12 @@ def book_before_reply(owner, execution, message, evidence):
     slot = evidence["slots"][0]
     if evidence.get("booking_candidate") != slot["start"] or len(evidence["slots"]) != 1:
         raise SchedulingReview("The booking no longer matches one explicitly proposed free time.")
+    details, links = calendar_link_details(
+        "Created by Jiraya from a checked meeting request.", message.body
+    )
     proposal = CalendarProposal.model_validate({
         "summary": message.subject[:255] or "Meeting",
-        "description": "Created by Jiraya from a checked meeting request.",
+        **details,
         "start": slot["start"], "end": slot["end"],
     })
     event_id = hashlib.sha256(
@@ -29,6 +33,7 @@ def book_before_reply(owner, execution, message, evidence):
         return (
             event.get("id") == event_id and event.get("status") != "cancelled"
             and event.get("summary") == proposal.summary
+            and links_verified(event, proposal.model_dump(), links)
             and private.get("jirayaAutomation") == execution.automation_id
             and private.get("jirayaSource") == execution.source_event_id
             and datetime.fromisoformat(event["start"]["dateTime"].replace("Z", "+00:00")) == proposal.start

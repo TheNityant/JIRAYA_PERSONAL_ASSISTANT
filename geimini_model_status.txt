@@ -1,0 +1,4 @@
+Yes—Gemini has been intermittent. We confirmed the key can work because one live test returned a Gemini-generated summary. But other calls got a temporary Google 503, so the service used the rule-based fallback instead. The API_KEY_INVALID error also appeared earlier, but a later successful call showed that at least one key configuration was valid at that point.
+
+So the integration is connected, but you can’t rely on every report getting Gemini analysis. Also, the green automated tests use a mock for the analyzer; they verify the API flow, not live Gemini availability. The fallback is intentional, and admins still make moderation decisions.
+

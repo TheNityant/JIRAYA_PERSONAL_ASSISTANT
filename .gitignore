@@ -1,0 +1,35 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+JIRAYA/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+credentials.json
+token.json
+.idea/
+.vscode/
+.DS_Store
+web/node_modules/
+web/.next/
+web/.env.local
+# Large installers and binary dependencies
+Docker Desktop Installer.exe
+python-manager-26.4.msix
+ffmpeg7s.zip
+ffmpeg7s_build/
+VisualStudioSetup.exe
+meet_profile/
+
+# Private credentials
+Save_credential.txt
+.env
+.env.*
+!.env.example

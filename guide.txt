@@ -1,0 +1,16 @@
+That output shows your installed WSL version doesn’t recognize --web-download. That’s okay; use Microsoft’s standalone kernel installer instead.
+
+Open Microsoft’s WSL kernel update page: https://aka.ms/wsl2kernel
+Download the WSL2 Linux kernel update package.
+Open the downloaded .msi file and follow the installer prompts. Approve the Windows permission prompt if it appears.
+Restart your computer.
+Open PowerShell and run:
+
+wsl --status
+
+Check that it no longer says “The WSL 2 kernel file is not found.”
+Then open Docker Desktop and wait for it to start. Once it does, run:
+
+docker version
+
+If the Microsoft installer shows an error, send me its exact wording.

@@ -1,0 +1,13 @@
+Fix secret hygiene + checkpoint test failures and verify pytest passes
+
+Explore existing meeting/assistant code to see what foundation exists
+
+Explain the full flow to the owner and get approval before building
+
+Build name-call detection (owner's name said 2-3+ times in the Meet triggers the assistant)
+
+Build voice cloning from a sample of the owner's voice (TTS in owner's voice)
+
+Add chat/speaking ability in the Meet once triggered
+
+Add tests for the new Meet assistant feature

@@ -48,6 +48,7 @@ async function main() {
       res.setHeader('Set-Cookie',['first=one; Path=/; HttpOnly; Expires=Wed, 01 Jan 2031 00:00:00 GMT','second=two; Path=/; HttpOnly']);
       return json(200, {ok:true});
     }
+    if (url.pathname === '/fixture/device') return json(200, {authorization:req.headers.authorization});
     if (url.pathname === '/fixture/error') return json(422, {detail:'fixture validation error'});
     if (url.pathname === '/fixture/echo') {
       let body = ''; for await (const chunk of req) body += chunk;
@@ -80,6 +81,8 @@ async function main() {
     assert.equal(health.headers.get('x-jiraya-proxy'),'route-v1');
     assert.deepEqual(await health.json(),{status:'ok'});
     assert.equal(health.headers.get('cache-control'),'private, no-store');
+    const scopedDevice = await fetch(frontend + '/api/jiraya/fixture/device',{headers:{Authorization:'Bearer fixture-device-only'}});
+    assert.equal((await scopedDevice.json()).authorization,'Bearer fixture-device-only');
     const cookies = await fetch(frontend + '/api/jiraya/fixture/cookies');
     assert.equal(cookies.headers.getSetCookie().length,2);
     for (const method of ['POST','PUT','PATCH','DELETE','OPTIONS']) {

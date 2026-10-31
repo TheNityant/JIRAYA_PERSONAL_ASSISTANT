@@ -20,3 +20,12 @@ token.json
 web/node_modules/
 web/.next/
 web/.env.local
+
+# Private Meet runtime evidence and browser sessions
+meet_profile/
+meet_profiles/
+meet_evidence/
+meet_voice_output/
+runtime/owner_voice_sample.wav
+credentials.txt
+*.conflict-backup

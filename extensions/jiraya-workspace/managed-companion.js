@@ -30,12 +30,12 @@ function createManager(vscode, context, call) {
   async function setup() {
     assertDesktop();
     const existing = context.globalState?.get('jiraya.managedPython');
-    if (existing) return existing;
+    if (existing && context.globalState.get('jiraya.meetRuntimeReady')) return existing;
     const answer = await vscode.window.showInformationMessage(
-      'Set up the local Git helper once? Jiraya will use Python 3.12+ and, if needed, install helper dependencies in a separate environment. Git credentials stay on this computer.',
+      'Set up the local Git helper once? Jiraya will use Python 3.12+ and, if needed, install helper dependencies in a separate environment and download Chromium for Meet attendance. Git credentials stay on this computer.',
       {modal:true},'Set up helper');
     if (answer !== 'Set up helper') throw Error('Local helper setup was cancelled.');
-    let python = 'python';
+    let python = existing || 'python';
     const extension = vscode.extensions?.getExtension('ms-python.python');
     if (extension) {
       const api = await extension.activate();
@@ -51,7 +51,7 @@ function createManager(vscode, context, call) {
     }
     await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Setting up Jiraya local helper'},async () => {
       try {
-        await execute(python,['-c','import fastapi, uvicorn, pydantic'],{timeout:15000,windowsHide:true});
+        await execute(python,['-c','import fastapi, uvicorn, pydantic, playwright'],{timeout:15000,windowsHide:true});
       } catch {
         const directory = path.join(context.globalStorageUri.fsPath,'python');
         await fs.mkdir(context.globalStorageUri.fsPath,{recursive:true});
@@ -60,6 +60,8 @@ function createManager(vscode, context, call) {
         await execute(python,['-m','pip','install','--disable-pip-version-check','-r',path.join(context.extensionPath,'companion-requirements.txt')],{timeout:240000,windowsHide:true});
       }
     });
+    await execute(python,['-m','playwright','install','chromium'],{timeout:240000,windowsHide:true});
+    await context.globalState.update('jiraya.meetRuntimeReady',true);
     await context.globalState.update('jiraya.managedPython',python);
     return python;
   }
@@ -71,7 +73,7 @@ function createManager(vscode, context, call) {
         const token = await readToken();
         const health = await call('/health','GET',undefined,token);
         if (health.service !== 'jiraya-local-companion') throw Error('This port is occupied by another service.');
-        if (!health.pairing_handoff) throw Error('An older Jiraya companion is running. Stop it in its original terminal with Ctrl+C, then connect again.');
+        if (!health.pairing_handoff || !health.meet_attendance) throw Error('An older Jiraya companion is running. Stop it in its original terminal with Ctrl+C, or restart this computer after saving your work, then connect again.');
         await context.secrets.store('jiraya.token',token);
         return token;
       };
@@ -80,7 +82,7 @@ function createManager(vscode, context, call) {
       }
       const python = await setup();
       const root = path.join(context.extensionPath,'companion');
-      await fs.access(path.join(root,'app','local_companion','server.py')).catch(() => {throw Error('Install the packaged Jiraya 0.4.0 VSIX to get the bundled helper.');});
+      await fs.access(path.join(root,'app','local_companion','server.py')).catch(() => {throw Error('Install the packaged Jiraya 0.5.0 VSIX to get the bundled helper.');});
       const child = spawn(python,['-m','app.local_companion','serve','--port',String(vscode.workspace.getConfiguration('jiraya').get('companionPort',8765)),'--config-dir',stateDirectory],{
         cwd:root,env:{...process.env,PYTHONPATH:root},detached:true,windowsHide:true,stdio:'ignore',
       });
@@ -120,12 +122,18 @@ function createManager(vscode, context, call) {
     if (!ownedProcess || ownedProcess.exitCode !== null) throw Error('This window did not start the running helper. Stop it from its original window or terminal.');
     const job = await call('/checkpoints/latest');
     if (job?.status === 'RUNNING') throw Error('Wait for the current checkpoint to finish before stopping the helper.');
+    await call('/meeting/pause','POST');
+    for(let attempt=0;attempt<40;attempt++){
+      if(!(await call('/meeting/status')).active)break;
+      if(attempt===39)throw Error('Wait for Meet attendance to leave before stopping the helper.');
+      await new Promise(resolve=>setTimeout(resolve,250));
+    }
     const child = ownedProcess;
     await new Promise(resolve => {child.once('exit',resolve);child.kill();});
     ownedProcess = undefined;
   }
   return {start,stop,setup,connect,configured:()=>Boolean(context.globalState?.get('jiraya.managedPython')),
-    reset:async()=>context.globalState.update('jiraya.managedPython',undefined)};
+    reset:async()=>{await context.globalState.update('jiraya.managedPython',undefined);await context.globalState.update('jiraya.meetRuntimeReady',false);}};
 }
 
 module.exports = {createManager,parseWebPairing};

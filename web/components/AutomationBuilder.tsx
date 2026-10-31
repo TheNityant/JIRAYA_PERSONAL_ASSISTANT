@@ -8,6 +8,7 @@ import AutomationCanvas from "@/components/AutomationCanvas";
 import { actionLabels, actionsFor, isConnected, routeReady, services } from "@/lib/automation-graph";
 
 import { useEffect, useState } from "react";
+import MeetWorkspace from "./MeetWorkspace";
 import {
   api,
   Automation,
@@ -38,7 +39,7 @@ const emptyAutomation: AutomationInput = {
   approval_policy: "REQUIRED",
 };
 
-type View = "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS" | "CALENDAR" | "GITHUB";
+type View = "MEET" | "AUTOMATIONS" | "NOTIFICATIONS" | "OBLIGATIONS" | "CALENDAR" | "GITHUB";
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -457,6 +458,7 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
         </div>
 
         <nav className="primary-nav">
+          <button className={activeView === "MEET" ? "active" : ""} onClick={()=>setActiveView("MEET")}>Meet</button>
           <button className={activeView === "GITHUB" ? "active" : ""} onClick={() => setActiveView("GITHUB")}>GitHub</button>
           <button className={activeView === "CALENDAR" ? "active" : ""} onClick={() => setActiveView("CALENDAR")}>Calendar</button>
           <button className={activeView === "AUTOMATIONS" ? "active" : ""} onClick={() => setActiveView("AUTOMATIONS")}>Automations</button>
@@ -527,7 +529,7 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
         </div>
       </aside>
 
-      {activeView === "AUTOMATIONS" ? (
+      {activeView === "MEET" ? <MeetWorkspace accountId={accountId} onPair={()=>setActiveView("GITHUB")}/> : activeView === "AUTOMATIONS" ? (
         <>
           <section className="canvas-shell">
             <header className="topbar">

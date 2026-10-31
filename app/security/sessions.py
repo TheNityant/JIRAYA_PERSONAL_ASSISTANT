@@ -75,6 +75,23 @@ class AccountMiddleware:
                         user = db.get(User, session.user_id)
                         if user:
                             current = (user.id, user.email)
+        device_authenticated = False
+        if path.startswith("/meet/device/") and request.headers.get("authorization", "").startswith("Bearer "):
+            from app.services.runtime_state_store import RuntimeStateStore
+            raw = request.headers["authorization"][7:]
+            with SessionLocal() as db:
+                device = RuntimeStateStore(db).get("meet-device:" + digest(raw))
+                if device:
+                    try:
+                        expires = datetime.fromisoformat(device["expires_at"])
+                        user = db.get(User, device["user_id"])
+                        if expires > datetime.now(timezone.utc) and user:
+                            current = (user.id, user.email)
+                            device_authenticated = True
+                    except (ValueError, KeyError, TypeError):
+                        pass
+            if not device_authenticated:
+                return await JSONResponse({"detail": "Device authorization expired. Reconnect Meet on this computer."}, status_code=401)(scope, receive, send)
         if settings.auth_required and not public and not current:
             if (
                 path.startswith("/connections/")
@@ -88,7 +105,7 @@ class AccountMiddleware:
             response = JSONResponse({"detail": "Sign in to Jiraya to continue."}, status_code=401)
             return await response(scope, receive, send)
         # Origin checks cover cookie-authenticated writes and account creation/login.
-        if request.method not in {"GET", "HEAD"} and not path.startswith("/webhooks/"):
+        if request.method not in {"GET", "HEAD"} and not path.startswith("/webhooks/") and not device_authenticated:
             origin = request.headers.get("origin")
             allowed = {item.strip().rstrip("/") for item in settings.frontend_origins.split(",")}
             if origin and origin.rstrip("/") not in allowed:

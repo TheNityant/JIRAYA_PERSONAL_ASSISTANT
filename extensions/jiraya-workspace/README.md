@@ -7,12 +7,12 @@ The companion uses ordinary local Git. Existing Git Credential Manager/SSH authe
 ## Setup
 
 1. Install Python 3.12+ and Git on this computer. You do not need the Jiraya backend or a project checkout to run the packaged helper.
-2. Install `jiraya-workspace-0.4.0.vsix` using Extensions → ⋯ → **Install from VSIX**, then reload your project windows.
+2. Install `jiraya-workspace-0.5.0.vsix` using Extensions → ⋯ → **Install from VSIX**, then reload your project windows.
 3. In the Jiraya website, open GitHub and choose **Connect with VS Code**. Allow the browser to open VS Code. Confirm the website shown by VS Code and choose **Set up helper**. The extension uses your Python interpreter and installs helper dependencies in an isolated environment if needed. Allow local-network access in your browser, then return to the original tab. No token copying is required.
 4. Open your local projects in trusted VS Code windows. Run **Jiraya: Add Git Projects** to select multiple existing repository folders. Adding folders does not enable a policy or push changes.
 5. Enable each project and choose its branch in Jiraya. Pairing is remembered for this Jiraya account and browser origin, even after sign-out. Project policies and the device token persist in your local app data; the IDE token uses VS Code SecretStorage. Subsequent VS Code startups restart the helper automatically.
 
-Upgrading from a manually started older helper: wait for active checkpoints to finish, stop it with Ctrl+C in its original terminal, and install 0.4.0. Pair once using the new website flow. A new browser profile, frontend domain, computer, or cleared browser storage requires pairing again. Remote SSH/WSL/container workspaces are outside this desktop release.
+Upgrading from a manually started older helper: wait for active checkpoints to finish, stop it with Ctrl+C in its original terminal, and install 0.5.0. Pair once using the new website flow. A new browser profile, frontend domain, computer, or cleared browser storage requires pairing again. Remote SSH/WSL/container workspaces are outside this desktop release.
 
 **Jiraya: Set Up Local Companion** can reselect Python. **Jiraya: Stop Local Companion** stops only a helper started by that window and refuses while a checkpoint is running. Closing VS Code does not forcibly interrupt the helper. Restarting the computer stops it until VS Code starts again.
 
@@ -29,4 +29,26 @@ See the complete setup in `docs/WORKSPACE_CHECKPOINT.md` in the Jiraya repositor
 
 Click the Jiraya status bar item or run **Jiraya: Show Workspace Diagnostics**. Output → Jiraya Workspace shows connection errors, rejected folders and project branches without printing tokens. A window with no local folder or no Git repository is reported as such; successful device pairing alone is not reported as successful project registration. Invalid replacement tokens preserve the working token.
 
-Update and restart the Python companion alongside version 0.4.0 to receive detailed folder results. In the browser, **Registration details** expands automatically when no projects are found. A parent workspace is recognized as a container when its nested repositories are explicitly reported by the editor. Undetected repositories are not found through an arbitrary recursive disk scan: select them with **Jiraya: Add Git Projects**. Unsaved documents inside nested repositories still block their checkpoints. Git ownership failures are reported distinctly and no trust settings are changed automatically.
+Update and restart the Python companion alongside version 0.5.0 to receive detailed folder results. In the browser, **Registration details** expands automatically when no projects are found. A parent workspace is recognized as a container when its nested repositories are explicitly reported by the editor. Undetected repositories are not found through an arbitrary recursive disk scan: select them with **Jiraya: Add Git Projects**. Unsaved documents inside nested repositories still block their checkpoints. Git ownership failures are reported distinctly and no trust settings are changed automatically.
+
+
+## Calendar → Meet attendance
+
+Version 0.5.0 bundles the repaired Meet attendance runtime. Helper setup installs
+Playwright and downloads Chromium after your confirmation. In the Jiraya website,
+open **Meet**, review the device-attendance permission, and enable it. The device
+uses a narrowly scoped 30-day authorization to read eligible upcoming events from
+your primary Calendar, independently of browser sign-in sessions. It does not
+receive your Gmail, Google OAuth refresh token or GitHub credentials.
+
+The first due meeting opens a separate browser profile where you may need to sign
+in to Google manually. Host admission may still be required. The helper confirms
+microphone/camera are off before attempting a join. Keep the computer awake and
+helper running. The website may be closed after enabling. Pause attendance and
+leave from the Meet panel; failed attempts have an explicit Retry attendance action.
+Recording, transcription and cloned voice are not enabled by this runtime.
+
+If a detached 0.4.0 helper is still running after the extension upgrade, stop it
+from its original terminal or restart the computer once after saving all work.
+Then run **Jiraya: Set Up Local Companion** and reconnect the website.
+See `docs/MEET_INTEGRATION.md` for the full integration and live acceptance test.

@@ -487,3 +487,10 @@ button:focus-visible, a:focus-visible { outline: 2px solid #93b7ef; outline-offs
 .guide-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 28px 8px; border-top: 1px solid var(--border); }.guide-footer > div { display: flex; gap: 10px; }.guide-footer button { font-size: 12px; }
 .guide-reopen { color: var(--muted); font-size: 10px; margin: 8px 28px 20px; }
 @media (max-width: 560px) { .guide-top { padding: 14px 16px; }.guide-progress { padding: 12px 14px 0; gap: 2px; }.guide-progress button { font-size: 9px; gap: 4px; }.guide-body { padding: 22px 18px; }.guide-services, .guide-flow { grid-template-columns: 1fr; gap: 8px; }.guide-services article, .guide-flow article { padding: 14px; }.guide-icon { float: left; margin: 0 14px 14px 0; }.guide-connected, .guide-neutral { margin-top: 8px; }.guide-flow h3 { margin-top: 8px; }.guide-footer { padding: 16px 14px 8px; }.guide-footer > div { gap: 5px; }.guide-footer button { padding: 9px; font-size: 11px; }.guide-launch { font-size: 10px; } }
+
+.meet-setup, .meet-events { padding: 26px; margin: 24px 0; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
+.meet-setup p, .meet-setup li, .meet-events p { color: var(--muted); font-size: 13px; line-height: 1.8; }
+.meet-setup-icon { display: flex; gap: 22px; align-items: center; color: #a8c8b3; }
+.meet-consent { display: flex; align-items: flex-start; gap: 10px; margin: 22px 0; font-size: 13px; line-height: 1.7; }
+.meet-consent input { flex: none; width: 18px; height: 18px; margin-top: 3px; }
+.meet-events article { padding: 16px 0; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; }

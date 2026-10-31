@@ -21,6 +21,16 @@ See [service integrations and deployment](docs/SERVICE_INTEGRATIONS.md#frontend-
 for account sessions, connection setup, production URLs and existing-workspace handling.
 The sections below retain the original Phase 1 standalone CLI workflow for reference.
 
+## Google Meet attendance integration
+
+The Phase 2e frontend now includes **Meet attendance**. An opted-in, paired local
+device reads the user’s primary Calendar through a scoped device authorization and
+attempts to join eligible Google Meet events near their start time. Gmail-created
+Calendar events reuse the original meeting link. See the [setup and acceptance
+guide](docs/MEET_INTEGRATION.md). This attendance runtime does not enable recording,
+transcription or voice replies. A live Google browser session, host admission and
+a running local computer may be required.
+
 ## Current implementation: Phase 1 Gmail vertical slice
 
 ```text

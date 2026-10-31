@@ -185,3 +185,38 @@ def test_real_background_loop_creates_and_verifies_calendar_event_without_browse
         assert execution.status == "VERIFIED_SUCCESS"
         health = RuntimeStateStore(db).get("gmail-monitor-health:" + system.settings.dev_user_id)
         assert health["last_status"] == "OK" and health["last_decision"] == "PROCESSED"
+
+
+def test_gmail_calendar_meet_handoff_executes_once(system, monkeypatch, tmp_path):
+    from app.routes import meet
+    from app.meet_agent.device import MeetDevice
+    from app.meet_agent.joiner import JoinEvidence, JoinResult
+    from app.local_companion.server import Companion
+    from datetime import datetime, timedelta
+    from test_calendar_integration import Provider
+
+    moment = datetime.fromisoformat("2026-11-02T15:00:00+05:30")
+    provider = Provider(response={"summary":"Email meeting", "description":"Summary omitted the URL",
+        "start":moment.isoformat(), "end":(moment+timedelta(hours=1)).isoformat()})
+    system.runtime.executor.provider=provider
+    system.runtime.poll()
+    system.gmail.history,system.gmail.pending="200",[system.source.id]
+    result=system.runtime.poll()
+    assert result["results"][0]["results"][0]["result"]["verification_status"]=="VERIFIED_SUCCESS"
+    system.calendar.list_events=lambda **kwargs:list(system.calendar.events.values())
+    monkeypatch.setattr(meet,"get_calendar_client",lambda *args:system.calendar)
+    monkeypatch.setattr(meet,"get_settings",lambda:system.settings)
+    feed=meet.upcoming_meetings(db=system.db)
+    assert len(feed["items"])==1 and feed["items"][0]["url"]==LINK
+    state=Companion(tmp_path);state.config["meet"]={"enabled":True,"account_id":system.settings.dev_user_id,"api_base":"https://fixture.test/api/jiraya","device_token":"fixture"}
+    device=MeetDevice(state);device.feed=lambda config:feed
+    joins=[]
+    class Browser:
+        def __init__(self,**kwargs):self.joined=kwargs["on_joined"]
+        async def join(self,url):
+            joins.append(url);self.joined()
+            return JoinResult("JOINED","IN_CALL_UI_VISIBLE",JoinEvidence(url,notes=["in_call_ui_visible"]))
+    device.poll(now=moment,joiner_factory=Browser)
+    system.runtime.poll();device.poll(now=moment,joiner_factory=Browser)
+    assert system.calendar.inserts==1 and joins==[LINK]
+    assert device.status()["recent"][0]["status"]=="COMPLETED"

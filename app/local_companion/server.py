@@ -1,11 +1,13 @@
 """A separately started loopback service: no cloud server can read local folders."""
 
 import json
+import asyncio
 import secrets
 import threading
 import time
 from datetime import UTC, datetime
 from inspect import signature
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -52,6 +54,15 @@ class ProjectPolicy(BaseModel):
 
 class RunRequest(BaseModel):
     message: str = Field(default="Jiraya workspace checkpoint", min_length=1, max_length=200)
+
+
+class MeetRetry(BaseModel):
+    key: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class MeetConnect(BaseModel):
+    api_base: str = Field(max_length=500)
+    device_token: str = Field(min_length=30, max_length=200)
 
 
 class PairingRequest(BaseModel):
@@ -295,7 +306,20 @@ class Companion:
 def create_companion(directory: Path, origins: list[str]) -> FastAPI:
     state = Companion(directory)
     origins = list(dict.fromkeys(origins + state.config.get("origins", [])))
-    app = FastAPI(title="Jiraya Local Workspace Companion", docs_url=None, redoc_url=None)
+    from app.meet_agent.device import MeetDevice
+    attendance = MeetDevice(state)
+
+    @asynccontextmanager
+    async def lifespan(_):
+        attendance.start()
+        try:
+            yield
+        finally:
+            attendance.stop()
+            if attendance.thread is not None:
+                await asyncio.to_thread(attendance.thread.join, 25)
+
+    app = FastAPI(title="Jiraya Local Workspace Companion", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.companion = state
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"]
@@ -319,9 +343,40 @@ def create_companion(directory: Path, origins: list[str]) -> FastAPI:
         if not secrets.compare_digest(authorization, f"Bearer {state.config['token']}"):
             raise HTTPException(401, "Pair this device using the companion token.")
 
+    app.state.meet = attendance
+
+    @app.get("/meeting/status", dependencies=[Depends(authorize)])
+    def meeting_status():
+        return attendance.status()
+
+    @app.post("/meeting/connect", dependencies=[Depends(authorize)])
+    def meeting_connect(body: MeetConnect, request: Request):
+        origin = request.headers.get("origin", "")
+        try:
+            frontend_origin(origin)
+        except ValueError:
+            raise HTTPException(422, "Use HTTPS or localhost for device authorization") from None
+        if not origin or body.api_base.rstrip("/") != origin + "/api/jiraya":
+            raise HTTPException(422, "Connect from your Jiraya website using its same-origin API.")
+        try:
+            return attendance.configure(body.api_base, body.device_token)
+        except Exception:
+            raise HTTPException(503, "Could not authorize this computer. Check Calendar and the deployed API.") from None
+
+    @app.post("/meeting/retry", dependencies=[Depends(authorize)])
+    def retry_attendance(body: MeetRetry):
+        try:
+            return attendance.retry(body.key)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/meeting/pause", dependencies=[Depends(authorize)])
+    def pause_attendance():
+        return attendance.pause()
+
     @app.get("/health", dependencies=[Depends(authorize)])
     def health():
-        return {"service": "jiraya-local-companion", "version": 2, "pairing_handoff": True}
+        return {"service": "jiraya-local-companion", "version": 2, "pairing_handoff": True, "meet_attendance": True}
 
     @app.post("/pairing/requests", dependencies=[Depends(authorize)])
     def request_pairing(body: PairingRequest):

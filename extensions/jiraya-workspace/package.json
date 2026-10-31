@@ -2,7 +2,7 @@
   "name": "jiraya-workspace",
   "displayName": "Jiraya Workspace Checkpoint",
   "description": "Register open local Git projects with Jiraya and checkpoint enabled repositories together.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "jiraya-local",
   "license": "MIT",
   "engines": {

@@ -5,6 +5,7 @@ const {chromium}=require('playwright');
 async function main(){
  const web=path.resolve(__dirname,'..'),frontend='http://127.0.0.1:3124';
  const user={id:'saved-user',email:'fixture@example.test',display_name:'Fixture'};
+ let meetEnabled=false;
  let signedIn=true,disconnected=false,server,browser,logs='',claims=0;
  const calls=[];
  const rule=(id,name,source)=>({id,name,description:'',source,enabled:true,trigger_type:source==='gmail'?'NEW_EMAIL':'GITHUB_PR_CHANGED',match_config:{},context_config:{},action_config:source==='gmail'?{type:'CREATE_CALENDAR_EVENT',time_zone:'Asia/Kolkata',default_event_minutes:60}:{type:'NOTIFY',repository:'fixture/repo'},approval_policy:'REQUIRED',system_pipeline:[],created_at:'2026-10-30T10:00:00Z',updated_at:'2026-10-30T10:00:00Z'});
@@ -18,6 +19,8 @@ async function main(){
   if(url.pathname==='/auth/login'){signedIn=true;return json({user});}
   if(!signedIn)return json({detail:'Sign in'},401);
   if(url.pathname==='/connections')return json({catalog:['gmail','google_calendar','github'].map(id=>({id,provider:id,label:id,status:disconnected?'AVAILABLE':'CONNECTED',account:'fixture@example.test',connect_path:'/fixture'}))});
+  if(url.pathname==='/meet/device/events')return json({status:'READY',items:[{id:'meet-event',summary:'Fixture meeting',url:'https://meet.google.com/abc-defg-hij',start:'2026-11-02T15:00:00+05:30',end:'2026-11-02T16:00:00+05:30'}]});
+  if(url.pathname==='/meet/devices')return json({token:'fixture-scoped-device-authorization'});
   if(url.pathname==='/automations')return json(rules);
   if(url.pathname==='/automation-executions')return json(url.searchParams.get('automation_id')==='calendar-rule'?[execution]:[]);
   if(url.pathname==='/gmail/inbox/recent')return json({items:[{id:'chosen-email',subject:'Chosen interview',sender:'sender@example.test'}]});
@@ -38,6 +41,9 @@ async function main(){
   const json=(data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
   if(req.url==='/pairing/claim'){claims++;return json({service:'jiraya-local-companion',token:deviceToken});}
   if(req.headers.authorization!==`Bearer ${deviceToken}`)return json({detail:'Bad fixture token'},401);
+  if(req.url==='/meeting/connect'){let body='';for await(const chunk of req)body+=chunk;const data=JSON.parse(body);assert.equal(data.api_base,frontend+'/api/jiraya');assert.equal(data.device_token,'fixture-scoped-device-authorization');meetEnabled=true;return json({enabled:true,configured:true,active:false,recent:[]});}
+  if(req.url==='/meeting/pause'){meetEnabled=false;return json({enabled:false,configured:false,active:false,recent:[]});}
+  if(req.url==='/meeting/status')return json({enabled:meetEnabled,configured:meetEnabled,active:false,recent:[]});
   if(req.url==='/projects')return json({items:['first','second'].map((id,index)=>({id,path:`/fixture/${id}`,repository:`fixture/${id}`,branch:index?'develop':'main',target_branch:index?'develop':'main',enabled:true,files:[]})),registration:{session_count:2,items:[]}});
   if(req.url==='/checkpoints/latest')return json(null);
   return json({service:'jiraya-local-companion'});
@@ -77,6 +83,11 @@ async function main(){
   const panel=page.getByRole('region',{name:'Local workspace checkpoint'});
   await panel.getByText('Companion connected',{exact:true}).waitFor();await panel.getByText('2 open Git projects · 2 enabled',{exact:true}).waitFor();
   assert.equal(claims,1);assert.equal(await page.evaluate(()=>!!localStorage.getItem('jiraya.companion:saved-user')),true);
+  await page.getByRole('button',{name:'Meet',exact:true}).click();await page.getByRole('heading',{name:'Meet attendance',exact:true}).waitFor();
+  const enable=page.getByRole('button',{name:'Enable automatic attendance',exact:true});assert.equal(await enable.isEnabled(),false);
+  await page.getByRole('checkbox').check();await enable.click();await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
+  if(process.env.JIRAYA_MEET_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_MEET_SCREENSHOT});
+  await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).click();await enable.waitFor();
   await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();
   await page.getByLabel('Email',{exact:true}).fill(user.email);await page.getByLabel('Password',{exact:true}).fill('fixture-password-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('heading',{name:'Saved email to Calendar',exact:true}).waitFor();await page.getByRole('button',{name:'GitHub',exact:true}).click();

@@ -35,7 +35,7 @@ async function proxy(request: Request) {
   target.search = incoming.search;
 
   const headers = new Headers();
-  for (const name of ["accept", "accept-language", "content-type", "cookie", "origin", "referer"]) {
+  for (const name of ["accept", "accept-language", "authorization", "content-type", "cookie", "origin", "referer"]) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }

@@ -6,7 +6,7 @@ A normal hosted frontend cannot execute Git in arbitrary desktop folders. A smal
 
 ## Install once on your development computer
 
-Install Python 3.12+ and Git locally. Download [Jiraya Workspace 0.4.0](../extensions/jiraya-workspace/jiraya-workspace-0.4.0.vsix), then use VS Code → Extensions → ⋯ → **Install from VSIX**. Reload your project windows. The package includes the minimal helper; a local Jiraya backend checkout and `.env` are unnecessary.
+Install Python 3.12+ and Git locally. Download [Jiraya Workspace 0.5.0](../extensions/jiraya-workspace/jiraya-workspace-0.5.0.vsix), then use VS Code → Extensions → ⋯ → **Install from VSIX**. Reload your project windows. The package includes the minimal helper; a local Jiraya backend checkout and `.env` are unnecessary.
 
 In the hosted Jiraya frontend, open **GitHub → Connect with VS Code**. Allow the browser to open VS Code, confirm the exact website, and approve **Set up helper**. The extension checks Python and installs the helper dependencies in an isolated environment if required. Allow the browser's local-network access prompt, then return to the original Jiraya tab. It completes pairing automatically without copying a token or putting a token into a URL.
 
@@ -44,7 +44,7 @@ Only saved disk contents can be committed. Reported unsaved documents cause that
 
 ## Registration diagnostics
 
-After updating, restart the companion, install `jiraya-workspace-0.4.0.vsix`, and run **Developer: Reload Window** in your VS Code project windows. The browser and extension use the same companion token; no `.env` edit is needed.
+After updating, restart the companion, install `jiraya-workspace-0.5.0.vsix`, and run **Developer: Reload Window** in your VS Code project windows. The browser and extension use the same companion token; no `.env` edit is needed.
 
 The extension status bar reports registered Git project counts or an actionable connection error. Click it or run **Jiraya: Show Workspace Diagnostics** to open **Output → Jiraya Workspace** and refresh registration. Diagnostics show the configured port, workspace trust, local folders, registration failures and project branches; they do not print pairing tokens or file contents. A failed replacement token is not saved over working credentials. Token changes automatically refresh other active windows using the same VS Code secret storage.
 

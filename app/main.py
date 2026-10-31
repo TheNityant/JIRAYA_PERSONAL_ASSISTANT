@@ -57,6 +57,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+from app.routes import meet
+
+app.include_router(meet.router)
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(ai.router)

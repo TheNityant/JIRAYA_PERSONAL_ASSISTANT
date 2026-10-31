@@ -9,7 +9,7 @@ const steps = [
   {label:"Connect", title:"Start with the accounts you use.", text:"Choose Connect beside a service and approve access on its own website. You can add more services later."},
   {label:"Automate", title:"Turn an incoming email into an action.", text:"In Automations, choose New automation or +. Select a trigger, set your matching conditions, then choose an action."},
   {label:"Review", title:"Choose how much control to keep.", text:"Start with Ask before action. Once you have checked a workflow, choose Automatic when you want it to act without approval."},
-  {label:"Workspace", title:"Keep your projects and commitments in view.", text:"Use Calendar to review events, GitHub for repository tools, and Notifications and Obligations to follow what needs attention."},
+  {label:"Workspace", title:"Keep your projects and commitments in view.", text:"Use Calendar to review events, Meet to enable attendance on your paired computer, GitHub for repository tools, and Notifications and Obligations to follow what needs attention."},
 ];
 
 export default function FirstTimeGuide({accountId, connections, onWorkspace}: {accountId:string; connections:ConnectionCatalogItem[]; onWorkspace:()=>void}) {

@@ -17,13 +17,13 @@ test('packaged helper starts, hands off once, reuses its token and restarts with
   let manager;
   try {
     await execute(python,[path.join(root,'build_vsix.py')]);
-    const archive = path.join(root,'jiraya-workspace-0.4.0.vsix');
-    await execute(python,['-c',`import sys, zipfile; z=zipfile.ZipFile(sys.argv[1]); assert len(z.namelist()) == 16; assert not any('.env' in n or 'config.py' in n for n in z.namelist()); z.extractall(sys.argv[2])`,archive,directory]);
+    const archive = path.join(root,'jiraya-workspace-0.5.0.vsix');
+    await execute(python,['-c',`import sys, zipfile; z=zipfile.ZipFile(sys.argv[1]); assert len(z.namelist()) == 23; assert not any('.env' in n or 'config.py' in n for n in z.namelist()); z.extractall(sys.argv[2])`,archive,directory]);
     const extensionPath = path.join(directory,'extension');
     const {createManager} = require(path.join(extensionPath,'managed-companion.js'));
     const listener=net.createServer();await new Promise(resolve=>listener.listen(0,'127.0.0.1',resolve));
     let port=listener.address().port;await new Promise(resolve=>listener.close(resolve));
-    const globalValues = new Map([['jiraya.managedPython',python]]), secrets = new Map(), messages=[];
+    const globalValues = new Map([['jiraya.managedPython',python],['jiraya.meetRuntimeReady',true]]), secrets = new Map(), messages=[];
     const context = {extensionPath,globalStorageUri:{fsPath:path.join(directory,'storage')},globalState:{get:key=>globalValues.get(key),update:async(key,value)=>globalValues.set(key,value)},secrets:{store:async(key,value)=>secrets.set(key,value)}};
     const vscode = {workspace:{isTrusted:true,getConfiguration:()=>({get:()=>port,update:async(key,value)=>{port=value;}})},env:{},ConfigurationTarget:{Global:1},window:{showInformationMessage:async(message,options,...choices)=>{messages.push(message);return choices[0];},showErrorMessage:message=>{throw Error(message);}}};
     const call=async(endpoint,method='GET',body,token=secrets.get('jiraya.token'))=>{

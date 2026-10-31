@@ -44,6 +44,9 @@ def build():
         "app/local_companion/server.py",
         "app/local_companion/git.py",
         "app/integrations/github/validation.py",
+        "app/meet_agent/__init__.py", "app/meet_agent/joiner.py",
+        "app/meet_agent/selector_fallbacks.py", "app/meet_agent/session_check.py",
+        "app/meet_agent/link_detector.py", "app/meet_agent/device.py", "app/meet_agent/verifier.py",
     ):
         entries["extension/companion/" + source] = (ROOT / source).read_bytes()
     output = HERE / f"jiraya-workspace-{version}.vsix"

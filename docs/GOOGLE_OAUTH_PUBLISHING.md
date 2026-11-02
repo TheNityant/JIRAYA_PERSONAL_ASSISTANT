@@ -27,6 +27,14 @@ Changing an environment variable cannot change Google's publishing or review sta
    - Privacy: `https://jiraya-personal-assistant.vercel.app/privacy`
    - Terms: `https://jiraya-personal-assistant.vercel.app/terms`
 
+   `/` is a server-rendered public description of the app and its services. It
+   requires neither login, JavaScript nor a running backend. Sign-in and the
+   automation workspace live at `/app`; do not use `/app` as the OAuth Branding
+   home page. The Google site-verification tag remains in the root layout.
+   Legacy provider completion redirects to `/?connection=...&status=...` are
+   forwarded to `/app` with their result, preserving existing callback settings.
+   Keep `FRONTEND_BASE_URL` as the frontend origin, without adding `/app`.
+
    The operator must review these disclosures against the actual deployed database,
    AI-provider data handling and retention settings before public onboarding.
    Updating pages does not configure a provider's retention or training settings,

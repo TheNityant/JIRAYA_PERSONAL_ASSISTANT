@@ -42,7 +42,8 @@ async function main() {
     if (url.pathname === '/connections') return json(user ? 200 : 401, user ? {catalog:[]} : {detail:'Sign in required'});
     if (['/connections/google/callback','/connections/google/calendar/callback','/connections/github/callback'].includes(url.pathname)) {
       if (!user || url.searchParams.get('state') !== 'fixture-state') return json(401, {detail:'Session or query missing'});
-      res.writeHead(302, {Location:frontend + '/?fixture_callback=ok'}); return res.end();
+      const provider=url.pathname.includes('/calendar/')?'google_calendar':url.pathname.includes('/github/')?'github':'google';
+      res.writeHead(302, {Location:frontend + '/?connection='+provider+'&status=connected'}); return res.end();
     }
     if (url.pathname === '/fixture/cookies') {
       res.setHeader('Set-Cookie',['first=one; Path=/; HttpOnly; Expires=Wed, 01 Jan 2031 00:00:00 GMT','second=two; Path=/; HttpOnly']);
@@ -95,11 +96,37 @@ async function main() {
     const head = await fetch(frontend + '/api/jiraya/health',{method:'HEAD'});
     assert.equal(head.status,200);
     assert.equal(await head.text(),'');
+    const publicHome=await fetch(frontend);
+    assert.equal(publicHome.status,200);
+    const homeHtml=await publicHome.text();
+    for(const text of ['Jiraya Personal Assistant','Gmail','Google Calendar','GitHub','Nebius Token Factory','href="/privacy"','href="/terms"','href="/app"','XgPI9z9r58QUxOp-Oyy4TGBqI9U8220RXheeaVdmvt0'])assert(homeHtml.includes(text),text);
+    assert(!homeHtml.includes('Welcome back'));assert(!homeHtml.includes('type="password"'));
+    for(const provider of ['google','google_calendar','github']){
+      const response=await fetch(frontend+'/?'+new URLSearchParams({connection:provider,status:'error',detail:'Fixture access denied',next:'https://untrusted.example'}),{redirect:'manual'});
+      assert.equal(response.status,307);
+      const destination=new URL(response.headers.get('location'),frontend);
+      assert.equal(destination.origin,frontend);assert.equal(destination.pathname,'/app');
+      assert.equal(destination.searchParams.get('connection'),provider);assert.equal(destination.searchParams.get('detail'),'Fixture access denied');assert(!destination.searchParams.has('next'));
+    }
+    assert.equal((await fetch(frontend+'/?connection=unknown&status=error')).status,200);
     browser = await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH ? {executablePath:process.env.CHROMIUM_EXECUTABLE_PATH} : {})});
     const context = await browser.newContext();
     const page = await context.newPage();
     await page.addInitScript(()=>localStorage.setItem("jiraya.guide.v1:fixture-user","seen"));
+    // The public description and verification tag must work without client JS or authentication.
+    const publicContext=await browser.newContext({javaScriptEnabled:false,viewport:{width:1440,height:1000}});
+    const publicPage=await publicContext.newPage();const beforePublic=calls.length;
+    await publicPage.goto(frontend);await publicPage.getByRole('heading',{name:'Jiraya Personal Assistant',exact:true}).waitFor();
+    assert.equal(calls.length,beforePublic);
+    assert.equal(await publicPage.locator('input[type=password]').count(),0);
+    assert.equal(await publicPage.locator('head meta[name="google-site-verification"]').getAttribute('content'),'XgPI9z9r58QUxOp-Oyy4TGBqI9U8220RXheeaVdmvt0');
+    if(process.env.JIRAYA_LANDING_SCREENSHOT)await publicPage.screenshot({path:process.env.JIRAYA_LANDING_SCREENSHOT,fullPage:true});
+    await publicPage.setViewportSize({width:390,height:844});
+    assert(await publicPage.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+    if(process.env.JIRAYA_LANDING_MOBILE_SCREENSHOT)await publicPage.screenshot({path:process.env.JIRAYA_LANDING_MOBILE_SCREENSHOT,fullPage:true});
+    await publicContext.close();
     await page.goto(frontend);
+    await page.getByRole('link',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();
     const login = async password => {
       await page.getByLabel('Email',{exact:true}).fill('fixture@example.test');
@@ -117,7 +144,8 @@ async function main() {
     await page.getByRole('heading',{name:'Connect your accounts',exact:true}).waitFor();
     for (const callback of ['google/callback','google/calendar/callback','github/callback']) {
       await page.goto(frontend + '/api/jiraya/connections/' + callback + '?state=fixture-state');
-      assert.match(page.url(),/fixture_callback=ok/);
+      await page.waitForURL(url=>url.pathname==='/app');
+      await page.getByRole('heading',{name:'Connect your accounts',exact:true}).waitFor();
     }
     await page.getByRole('button',{name:'Sign out',exact:true}).click();
     await page.getByRole('heading',{name:'Welcome back',exact:true}).waitFor();
@@ -127,7 +155,7 @@ async function main() {
     await page.getByRole('alert').filter({hasText:'browser did not retain'}).waitFor();
     assert(calls.some(call => call.path === '/auth/login' && call.origin === frontend));
     await context.close();
-    console.log('PASS: explicit API route, health, write verbs/query/body, backend validation, multiple cookies, login/refresh, all three OAuth callback paths, logout and missing-session error');
+    console.log('PASS: public server-rendered homepage without JS or backend calls, verification metadata, mobile fit, scoped OAuth-result redirects, workspace login/refresh, all three OAuth callbacks, cookies, device auth proxy, logout and missing-session error');
   } finally {
     if (browser) await browser.close();
     if (server) {try {process.kill(-server.pid,'SIGTERM');} catch {} server.stdout.destroy(); server.stderr.destroy(); server.unref();}

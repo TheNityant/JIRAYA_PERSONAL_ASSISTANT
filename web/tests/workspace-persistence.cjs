@@ -57,6 +57,7 @@ async function main(){
   browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
   await page.goto(frontend);
+  await page.locator('.landing-primary').click();
   const guide=page.getByRole('dialog',{name:'Your services, working together.'});await guide.waitFor();
   if(process.env.JIRAYA_GUIDE_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_GUIDE_SCREENSHOT});
   await page.setViewportSize({width:390,height:844});

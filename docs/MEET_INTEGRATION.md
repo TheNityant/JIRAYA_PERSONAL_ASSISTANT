@@ -30,12 +30,12 @@ are not enabled by the Meet page.
 1. Deploy the updated backend on Render and frontend on Vercel. Keep the existing
    OAuth setup, stable database and encryption key. No new Google OAuth client or
    dedicated GPU is required for this browser attendance path.
-2. Install `extensions/jiraya-workspace/jiraya-workspace-0.5.0.vsix` in desktop VS
+2. Install `extensions/jiraya-workspace/jiraya-workspace-0.5.1.vsix` in desktop VS
    Code. Save work and stop an older helper from its original terminal; if it was
    started detached by an old extension, restarting the computer once clears it.
 3. Run **Jiraya: Set Up Local Companion**. Approve helper setup, select Python 3.12+
    if needed, and allow the Chromium download. Git remains required for checkpoints.
-4. Pair the computer through **GitHub → Connect with VS Code** if not already paired.
+4. Pair the computer directly in **Meet → Connect with VS Code** if not already paired. GitHub authorization is not required.
    In **Meet**, explicitly enable automatic attendance for the primary Calendar.
 5. For the first due meeting, sign in manually to the separate Google browser
    profile if prompted. Gmail/Calendar OAuth does not create that browser session.
@@ -111,3 +111,33 @@ The updated browser regression covers Meet navigation, consent gating, enabling,
 pausing and the existing account/pairing flows. The packaged-helper test extracts
 and starts the actual VSIX payload. These checks do not join a live meeting or
 establish Windows browser/login readiness.
+
+## Meet repair regression checks (0.5.1)
+
+Pairing is available directly on the Meet page and shares the existing account-scoped
+companion pairing. The Meet variant never loads repositories or checkpoint actions.
+It does not start GitHub OAuth. Calendar connection is a separate explicit action.
+The UI disables enabling when the helper or cloud feed is unavailable, hides another
+account's attendance history, supports authorization renewal, and exposes explicit
+retry for a user-closed browser. Install the new VSIX and restart an old helper;
+health capability version 2 identifies the updated account-aware helper.
+
+Calendar feed handling follows short API pages up to a bounded 2500-event window,
+ignores invalid/naive/inverted timestamps, and deduplicates query variants of the same
+Meet room. Different room codes remain ambiguous and are excluded. The device also
+rejects malformed events independently, prevents concurrent browser launches and
+signals leaving locally before attempting cloud revocation.
+
+Run `python -m pytest -q`, `npm run build` from `web`, and
+`JIRAYA_TEST_PYTHON=$(which python) node --test extensions/jiraya-workspace/test/*.cjs`.
+From `web`, run `node tests/meet-workspace.cjs`, `node tests/workspace-persistence.cjs`
+and `node tests/workspace-pairing.cjs` with Playwright and Chromium installed.
+Browser fixtures exercise controls and navigation; they do not establish live
+Google compatibility or Windows setup. Use the live acceptance test above afterward.
+
+The actual Calendar OAuth flow currently requests `calendar.events`,
+`calendar.events.freebusy`, and `calendar.calendarlist.readonly`: event access,
+availability queries, and calendar discovery respectively. Declare and justify
+all three in Google Auth Platform when submitting this version; declaring only
+`calendar.events` does not match the deployed authorization request. Gmail requests
+`gmail.readonly` and `gmail.send`. Browser attendance does not request Meet REST scopes.

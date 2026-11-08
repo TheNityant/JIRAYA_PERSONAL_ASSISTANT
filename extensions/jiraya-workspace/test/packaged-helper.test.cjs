@@ -17,7 +17,7 @@ test('packaged helper starts, hands off once, reuses its token and restarts with
   let manager;
   try {
     await execute(python,[path.join(root,'build_vsix.py')]);
-    const archive = path.join(root,'jiraya-workspace-0.5.0.vsix');
+    const archive = path.join(root,'jiraya-workspace-0.5.1.vsix');
     await execute(python,['-c',`import sys, zipfile; z=zipfile.ZipFile(sys.argv[1]); assert len(z.namelist()) == 23; assert not any('.env' in n or 'config.py' in n for n in z.namelist()); z.extractall(sys.argv[2])`,archive,directory]);
     const extensionPath = path.join(directory,'extension');
     const {createManager} = require(path.join(extensionPath,'managed-companion.js'));

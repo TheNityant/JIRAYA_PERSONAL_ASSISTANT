@@ -542,7 +542,7 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
         </div>
       </aside>
 
-      {activeView === "MEET" ? <MeetWorkspace accountId={accountId} onPair={()=>setActiveView("GITHUB")}/> : activeView === "AUTOMATIONS" ? (
+      {activeView === "MEET" ? <MeetWorkspace key={accountId} accountId={accountId} calendarConnected={isConnected(connections,"google_calendar")} onConnectCalendar={()=>{const item=connections.find(item=>item.id==="google_calendar");if(item)void connect(item);}}/> : activeView === "AUTOMATIONS" ? (
         <>
           <section className="canvas-shell">
             <header className="topbar">

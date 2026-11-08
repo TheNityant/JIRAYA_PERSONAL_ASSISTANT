@@ -42,9 +42,9 @@ async function main(){
   const json=(data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
   if(req.url==='/pairing/claim'){claims++;return json({service:'jiraya-local-companion',token:deviceToken});}
   if(req.headers.authorization!==`Bearer ${deviceToken}`)return json({detail:'Bad fixture token'},401);
-  if(req.url==='/meeting/connect'){let body='';for await(const chunk of req)body+=chunk;const data=JSON.parse(body);assert.equal(data.api_base,frontend+'/api/jiraya');assert.equal(data.device_token,'fixture-scoped-device-authorization');meetEnabled=true;return json({enabled:true,configured:true,active:false,recent:[]});}
+  if(req.url==='/meeting/connect'){let body='';for await(const chunk of req)body+=chunk;const data=JSON.parse(body);assert.equal(data.api_base,frontend+'/api/jiraya');assert.equal(data.device_token,'fixture-scoped-device-authorization');meetEnabled=true;return json({enabled:true,configured:true,account_id:user.id,active:false,recent:[]});}
   if(req.url==='/meeting/pause'){meetEnabled=false;return json({enabled:false,configured:false,active:false,recent:[]});}
-  if(req.url==='/meeting/status')return json({enabled:meetEnabled,configured:meetEnabled,active:false,recent:[]});
+  if(req.url==='/meeting/status')return json({enabled:meetEnabled,configured:meetEnabled,account_id:meetEnabled?user.id:null,active:false,recent:[]});
   if(req.url==='/projects')return json({items:['first','second'].map((id,index)=>({id,path:`/fixture/${id}`,repository:`fixture/${id}`,branch:index?'develop':'main',target_branch:index?'develop':'main',enabled:true,files:[]})),registration:{session_count:2,items:[]}});
   if(req.url==='/checkpoints/latest')return json(null);
   return json({service:'jiraya-local-companion'});
@@ -54,7 +54,9 @@ async function main(){
   server=spawn(process.execPath,[path.join(web,'node_modules/next/dist/bin/next'),'dev','--hostname','127.0.0.1','--port','3124'],{cwd:web,detached:true,env:{...process.env,JIRAYA_BACKEND_URL:`http://127.0.0.1:${backend.address().port}`,NEXT_PUBLIC_JIRAYA_API_URL:'/api/jiraya'},stdio:['ignore','pipe','pipe']});
   server.stdout.on('data',v=>logs+=v);server.stderr.on('data',v=>logs+=v);
   for(let i=0;;i++){try{if((await fetch(frontend+'/api/jiraya/auth/me')).ok)break;}catch{}if(i>100)throw Error(logs);await new Promise(r=>setTimeout(r,300));}
-  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});
+  const launch={headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})};
+    if(process.env.JIRAYA_SPARTICUZ){const {default:binary}=await import(process.env.JIRAYA_SPARTICUZ);launch.executablePath=await binary.executablePath();launch.args=binary.args;}
+    browser=await chromium.launch(launch);
   const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
   await page.goto(frontend);
   await page.locator('.landing-primary').click();

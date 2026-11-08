@@ -375,3 +375,70 @@ def test_joiner_distinguishes_admission_and_closes_resources(outcome):
     if outcome == "JOINED":
         assert "in_call_ui_visible" in result.evidence.notes
     assert context.closed and engine.stopped
+
+
+def test_calendar_feed_deduplicates_room_queries_and_skips_invalid_times(clients, monkeypatch):
+    browser, token, *_ = clients
+    events = [
+        event(id="same-room", hangoutLink=LINK + "?authuser=0", description=LINK + "?authuser=1"),
+        event(id="bad-time", start={"dateTime": "not-a-date"}),
+        event(id="naive-time", start={"dateTime": "2026-11-02T09:30:00"}),
+        event(id="backwards", end={"dateTime": (NOW - timedelta(hours=1)).isoformat()}),
+        event(id="nullable", attendees=None),
+    ]
+    monkeypatch.setattr("app.routes.meet.get_calendar_client", lambda *args: SimpleNamespace(list_events=lambda **kw: events))
+    result = browser.get("/meet/device/events", headers={"Authorization": "Bearer " + token})
+    assert result.status_code == 200
+    assert [row["id"] for row in result.json()["items"]] == ["same-room", "nullable"]
+
+
+def test_device_skips_bad_events_and_does_not_join_concurrently(tmp_path):
+    state = Companion(tmp_path)
+    state.config["meet"] = {"enabled": True, "account_id": "owner", "api_base": "https://fixture.test", "device_token": "fixture"}
+    device = MeetDevice(state)
+    device.feed = lambda config: {"status": "READY", "account_id": "owner", "items": [
+        {"id": "broken", "url": LINK, "start": "invalid", "end": NOW.isoformat()},
+        {"id": "valid", "url": LINK, "start": NOW.isoformat(), "end": (NOW + timedelta(hours=1)).isoformat()},
+    ]}
+    starts = []
+    class Joiner:
+        def __init__(self, **kwargs):
+            pass
+        async def join(self, url):
+            starts.append(url)
+            # Reentrant status/poll must not launch an overlapping browser.
+            device.poll(now=NOW, joiner_factory=lambda **kw: pytest.fail("Concurrent join"))
+            return JoinResult("CLOSED", "BROWSER_WINDOW_CLOSED")
+    device.poll(now=NOW, joiner_factory=Joiner)
+    assert starts == [LINK]
+    status = device.status()
+    assert status["account_id"] == "owner"
+    assert "fixture" not in str(status)
+    key = status["recent"][0]["key"]
+    assert device.retry(key)["recent"][0]["status"] == "RETRY_REQUESTED"
+
+
+def test_pause_signals_local_leave_before_cloud_revocation(tmp_path):
+    state = Companion(tmp_path)
+    state.config["meet"] = {"enabled": True, "device_token": "fixture", "account_id": "owner"}
+    device = MeetDevice(state)
+    def revoke(config):
+        assert device.call_stop.is_set()
+        assert state.config["meet"]["enabled"] is False
+        assert "device_token" not in state.config["meet"]
+    device.revoke = revoke
+    assert device.pause()["enabled"] is False
+
+
+def test_calendar_client_follows_short_pages_until_requested_limit():
+    from app.integrations.calendar.client import CalendarClient
+    calls = []
+    pages = iter([{"items": [{"id": "first"}], "nextPageToken": "next"}, {"items": [{"id": "second"}]}])
+    def listing(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(execute=lambda: next(pages))
+    client = CalendarClient.__new__(CalendarClient)
+    client.service = SimpleNamespace(events=lambda: SimpleNamespace(list=listing))
+    result = client.list_events(time_min=NOW.isoformat(), max_results=2)
+    assert [row["id"] for row in result] == ["first", "second"]
+    assert calls[1]["pageToken"] == "next" and calls[1]["maxResults"] == 1

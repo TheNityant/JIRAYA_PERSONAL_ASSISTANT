@@ -7,7 +7,8 @@ type Project = {id: string; path: string; repository?: string; branch?: string; 
 type Result = {id: string; repository: string; branch: string; status: string; commit?: string; files?: number; detail?: string; remaining_files?: number; remaining_commits?: number};
 type Job = {id: string; status: string; message?: string; results: Result[]};
 
-export default function WorkspaceCheckpoint({accountId = "local"}: {accountId?: string}) {
+export default function WorkspaceCheckpoint({accountId = "local", purpose = "checkpoint", onPairingChange}: {accountId?: string; purpose?: "checkpoint" | "meet"; onPairingChange?: (paired: boolean) => void}) {
+  const meeting = purpose === "meet";
   const storageKey = `jiraya.companion:${accountId}`;
   const pendingKey = `jiraya.companion.pending:${accountId}`;
   const [token, setToken] = useState("");
@@ -46,6 +47,8 @@ export default function WorkspaceCheckpoint({accountId = "local"}: {accountId?: 
     const pending = sessionStorage.getItem(pendingKey);
     if (pending) {try {setPendingPair(JSON.parse(pending));} catch {sessionStorage.removeItem(pendingKey);}}
   }, [storageKey, pendingKey]);
+
+  useEffect(() => { onPairingChange?.(paired); }, [paired, onPairingChange]);
 
   useEffect(() => {
     if (!pendingPair) return;
@@ -88,13 +91,19 @@ export default function WorkspaceCheckpoint({accountId = "local"}: {accountId?: 
     let cancelled = false;
     async function refresh() {
       try {
+        if (meeting) {
+          const health = await call<{service: string}>("/health");
+          if (health.service !== "jiraya-local-companion") throw Error("This is not a Jiraya companion.");
+          if (!cancelled) {setOnline(true);setConnectionError("");}
+          return;
+        }
         const [rows, latest] = await Promise.all([call<{items: Project[]; registration?: Registration}>("/projects"), call<Job | null>("/checkpoints/latest")]);
         if (!cancelled) {setOnline(true);setProjects(rows.items);setRegistration(rows.registration || null);setJob(latest);setConnectionError("");}
       } catch (e: any) {if (!cancelled) {setOnline(false);setProjects([]);setRegistration(null);setConnectionError(e.message || "Start the local companion to connect.");}}
     }
     refresh(); const timer = window.setInterval(refresh, 5000);
     return () => {cancelled = true;window.clearInterval(timer);};
-  }, [paired, token, port, revision]);
+  }, [paired, token, port, revision, meeting]);
 
   async function pair(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -128,11 +137,11 @@ export default function WorkspaceCheckpoint({accountId = "local"}: {accountId?: 
     } catch (e: any) {setError(e.message);}
     finally {setBusy(false);}
   }
-  return <section className="checkpoint-panel" aria-label="Local workspace checkpoint">
-    <div className="checkpoint-header"><div><span className="eyebrow">Developer workspace · this computer</span><h2>Finish the day. Push your open projects.</h2><p>Commit saved changes and push enabled repositories to their configured branches using local Git.</p></div><span className={`state-badge ${online ? "open" : "warning"}`}>{online ? "Companion connected" : "Companion offline"}</span></div>
-    {connectionError && paired && <div className="service-alert" role="alert">{connectionError}. Open VS Code and allow this site's local-network permission. Your saved pairing and project policies are still retained. <button className="secondary-button" onClick={connectWithEditor}>Open VS Code to reconnect</button></div>}
+  return <section className="checkpoint-panel" aria-label={meeting ? "Meet device pairing" : "Local workspace checkpoint"}>
+    <div className="checkpoint-header"><div><span className="eyebrow">{meeting ? "Meet device · this computer" : "Developer workspace · this computer"}</span><h2>{meeting ? "Connect this computer for Meet" : "Finish the day. Push your open projects."}</h2><p>{meeting ? "Pair the local helper here, then enable attendance below. GitHub authorization and Git repositories are not required." : "Commit saved changes and push enabled repositories to their configured branches using local Git."}</p></div><span className={`state-badge ${online ? "open" : "warning"}`}>{online ? "Companion connected" : "Companion offline"}</span></div>
+    {connectionError && paired && <div className="service-alert" role="alert">{connectionError}. Open VS Code and allow this site's local-network permission. Your saved device pairing is still retained. <button className="secondary-button" onClick={connectWithEditor}>Open VS Code to reconnect</button></div>}
     {error && <div className="service-alert" role="alert">{error}</div>}
-    {!paired ? <div className="checkpoint-setup"><div><strong>Connect this computer once</strong><p>Install the Jiraya VS Code extension, then connect below. VS Code starts the local helper and remembers its settings. Your pairing is saved for this Jiraya account in this browser; signing out does not remove it.</p><p>Python 3.12+ and Git are needed on this computer. The website uses your local helper to access local projects.</p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/raw/refs/heads/phase2e-generic-execution/extensions/jiraya-workspace/jiraya-workspace-0.5.0.vsix" target="_blank" rel="noreferrer">Download VS Code extension ↗</a><p>In VS Code: Extensions → ⋯ → Install from VSIX. Install once, then reload your project windows.</p><button className="primary-button" onClick={connectWithEditor}>{pendingPair ? "Open VS Code again" : "Connect with VS Code"}</button>{pendingPair && <p role="status">Approve this website in VS Code, complete the one-time helper setup, allow local-network access in the browser, then return here. Waiting for this computer…</p>}<p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/blob/phase2e-generic-execution/docs/WORKSPACE_CHECKPOINT.md" target="_blank" rel="noreferrer">Setup help ↗</a></p></div><details><summary>Manual pairing / custom port</summary><form onSubmit={pair}><label>Pairing token<input name="companionToken" type={showToken ? "text" : "password"} required autoComplete="off" autoCapitalize="none" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)}/></label><label>Local port<input name="companionPort" inputMode="numeric" required value={port} onChange={(e) => setPort(e.target.value)}/></label><label className="checkpoint-token-visibility"><input type="checkbox" checked={showToken} onChange={(e) => setShowToken(e.target.checked)}/>Show pairing token</label><button className="secondary-button" disabled={busy}>Connect companion</button></form></details></div> : <>
+    {!paired ? <div className="checkpoint-setup"><div><strong>Connect this computer once</strong><p>Install the Jiraya VS Code extension, then connect below. VS Code starts the local helper and remembers its settings. Your pairing is saved for this Jiraya account in this browser; signing out does not remove it.</p><p>{meeting ? "Python 3.12+ and the Chromium helper are needed on this computer. The helper opens meetings locally; hosting the website does not run a meeting browser in the cloud." : "Python 3.12+ and Git are needed on this computer. The website uses your local helper to access local projects."}</p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/raw/refs/heads/main/extensions/jiraya-workspace/jiraya-workspace-0.5.1.vsix" target="_blank" rel="noreferrer">Download VS Code extension ↗</a><p>In VS Code: Extensions → ⋯ → Install from VSIX. Install once, then reload your project windows.</p><button className="primary-button" onClick={connectWithEditor}>{pendingPair ? "Open VS Code again" : "Connect with VS Code"}</button>{pendingPair && <p role="status">Approve this website in VS Code, complete the one-time helper setup, allow local-network access in the browser, then return here. Waiting for this computer…</p>}<p><a className="service-link" href="https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/blob/main/docs/WORKSPACE_CHECKPOINT.md" target="_blank" rel="noreferrer">Setup help ↗</a></p></div><details><summary>Manual pairing / custom port</summary><form onSubmit={pair}><label>Pairing token<input name="companionToken" type={showToken ? "text" : "password"} required autoComplete="off" autoCapitalize="none" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)}/></label><label>Local port<input name="companionPort" inputMode="numeric" required value={port} onChange={(e) => setPort(e.target.value)}/></label><label className="checkpoint-token-visibility"><input type="checkbox" checked={showToken} onChange={(e) => setShowToken(e.target.checked)}/>Show pairing token</label><button className="secondary-button" disabled={busy}>Connect companion</button></form></details></div> : meeting ? <div className="checkpoint-toolbar"><span>{online ? "Device paired. Continue to attendance setup below." : "Pairing saved. Waiting for the local helper."}</span><div><button className="ghost-button" onClick={()=>setRevision(v=>v+1)}>Check device</button><button className="ghost-button" onClick={()=>{localStorage.removeItem(storageKey);setPaired(false);setOnline(false);}}>Forget pairing</button></div></div> : <>
       <div className="checkpoint-toolbar"><span>{projects.length} open Git projects · {projects.filter((p) => p.enabled).length} enabled</span><div><button className="ghost-button" disabled={busy} onClick={() => setRevision((v) => v+1)}>Refresh projects</button><button className="ghost-button" disabled={busy || running} onClick={() => {localStorage.removeItem(storageKey);setPaired(false);setOnline(false);setProjects([]);setRegistration(null);setJob(null);}}>Forget pairing</button></div></div>
       {registration ? <div className="checkpoint-registration" aria-label="Workspace registration">
         <p className="checkpoint-note">{registration.session_count} registered editor or terminal sessions · registration expires after 45 seconds without a heartbeat.</p>

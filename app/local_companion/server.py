@@ -376,7 +376,7 @@ def create_companion(directory: Path, origins: list[str]) -> FastAPI:
 
     @app.get("/health", dependencies=[Depends(authorize)])
     def health():
-        return {"service": "jiraya-local-companion", "version": 2, "pairing_handoff": True, "meet_attendance": True}
+        return {"service": "jiraya-local-companion", "version": 2, "pairing_handoff": True, "meet_attendance": True, "meet_attendance_version": 2}
 
     @app.post("/pairing/requests", dependencies=[Depends(authorize)])
     def request_pairing(body: PairingRequest):

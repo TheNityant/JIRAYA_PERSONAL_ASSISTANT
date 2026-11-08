@@ -32,7 +32,7 @@ function createManager(vscode, context, call) {
     const existing = context.globalState?.get('jiraya.managedPython');
     if (existing && context.globalState.get('jiraya.meetRuntimeReady')) return existing;
     const answer = await vscode.window.showInformationMessage(
-      'Set up the local Git helper once? Jiraya will use Python 3.12+ and, if needed, install helper dependencies in a separate environment and download Chromium for Meet attendance. Git credentials stay on this computer.',
+      'Set up the local Jiraya helper once? Jiraya will use Python 3.12+ and, if needed, install helper dependencies in a separate environment and download Chromium for Meet attendance. Git credentials stay on this computer.',
       {modal:true},'Set up helper');
     if (answer !== 'Set up helper') throw Error('Local helper setup was cancelled.');
     let python = existing || 'python';
@@ -73,7 +73,7 @@ function createManager(vscode, context, call) {
         const token = await readToken();
         const health = await call('/health','GET',undefined,token);
         if (health.service !== 'jiraya-local-companion') throw Error('This port is occupied by another service.');
-        if (!health.pairing_handoff || !health.meet_attendance) throw Error('An older Jiraya companion is running. Stop it in its original terminal with Ctrl+C, or restart this computer after saving your work, then connect again.');
+        if (!health.pairing_handoff || !health.meet_attendance || health.meet_attendance_version !== 2) throw Error('An older Jiraya companion is running. Stop it in its original terminal with Ctrl+C, or restart this computer after saving your work, then connect again.');
         await context.secrets.store('jiraya.token',token);
         return token;
       };
@@ -82,7 +82,7 @@ function createManager(vscode, context, call) {
       }
       const python = await setup();
       const root = path.join(context.extensionPath,'companion');
-      await fs.access(path.join(root,'app','local_companion','server.py')).catch(() => {throw Error('Install the packaged Jiraya 0.5.0 VSIX to get the bundled helper.');});
+      await fs.access(path.join(root,'app','local_companion','server.py')).catch(() => {throw Error('Install the packaged Jiraya 0.5.1 VSIX to get the bundled helper.');});
       const child = spawn(python,['-m','app.local_companion','serve','--port',String(vscode.workspace.getConfiguration('jiraya').get('companionPort',8765)),'--config-dir',stateDirectory],{
         cwd:root,env:{...process.env,PYTHONPATH:root},detached:true,windowsHide:true,stdio:'ignore',
       });
@@ -105,7 +105,7 @@ function createManager(vscode, context, call) {
       assertDesktop();
       const request = parseWebPairing(uri);
       const confirmed = await vscode.window.showInformationMessage(
-        `Allow ${request.origin} to connect to this computer's Git helper? You will still choose and enable each repository before pushing.`,
+        `Allow ${request.origin} to connect to this computer's Jiraya helper? Meet attendance requires separate consent; repositories must be enabled separately before pushing.`,
         {modal:true},'Connect this website');
       if (confirmed !== 'Connect this website') return;
       await vscode.workspace.getConfiguration('jiraya').update('companionPort',request.port,vscode.ConfigurationTarget.Global);

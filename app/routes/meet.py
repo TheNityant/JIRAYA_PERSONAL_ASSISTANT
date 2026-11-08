@@ -3,6 +3,7 @@
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
@@ -53,7 +54,7 @@ def upcoming_meetings(db: Annotated[Session, Depends(get_db)]):
             calendar_id="primary",
             time_min=(now - timedelta(minutes=2)).isoformat(),
             time_max=(now + timedelta(days=1)).isoformat(),
-            max_results=100,
+            max_results=2500,
         )
     except Exception as exc:
         raise HTTPException(503, "Reconnect Calendar or check its access.") from exc
@@ -63,11 +64,15 @@ def upcoming_meetings(db: Annotated[Session, Depends(get_db)]):
             continue
         if any(
             row.get("self") and row.get("responseStatus") == "declined"
-            for row in event.get("attendees", [])
+            for row in (event.get("attendees") or [])
         ):
             continue
         start, end = event.get("start", {}).get("dateTime"), event.get("end", {}).get("dateTime")
-        if not start or not end:
+        try:
+            start_time, end_time = datetime.fromisoformat(start), datetime.fromisoformat(end)
+            if start_time.tzinfo is None or end_time.tzinfo is None or end_time <= start_time:
+                continue
+        except (TypeError, ValueError):
             continue
         links = extract_meet_links(
             str(event.get("location") or "") + "\n" + str(event.get("description") or "")
@@ -79,11 +84,14 @@ def upcoming_meetings(db: Annotated[Session, Depends(get_db)]):
             url = point.get("uri", "")
             if is_valid_meet_link(url) and url not in links:
                 links.append(url)
-        if len(links) == 1:
+        # Calendar often repeats one meeting URL with different authuser/query parameters.
+        # These are the same room, not ambiguous invitations to different meetings.
+        rooms = {urlsplit(link).path.lower(): link for link in reversed(links)}
+        if len(rooms) == 1 and event.get("id"):
             items.append(
                 {
                     "id": event["id"],
-                    "url": links[0],
+                    "url": next(iter(rooms.values())),
                     "start": start,
                     "end": end,
                     "summary": event.get("summary") or "Meeting",

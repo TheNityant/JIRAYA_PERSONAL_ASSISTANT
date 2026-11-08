@@ -4,6 +4,7 @@ import hashlib
 import json
 import threading
 from datetime import UTC, datetime
+from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from app.meet_agent.joiner import MeetJoiner
@@ -95,6 +96,12 @@ class MeetDevice:
         while not self.shutdown.is_set():
             try:
                 self.poll()
+            except HTTPError as exc:
+                self.error = (
+                    "Device authorization expired or was revoked. Renew device authorization in Meet."
+                    if exc.code == 401 else
+                    "Calendar access is unavailable. Reconnect Google Calendar and refresh Meet."
+                )
             except Exception as exc:  # noqa: BLE001 - isolate browser/provider failures from the device service
                 self.error = (
                     "Attendance check failed: "
@@ -120,20 +127,27 @@ class MeetDevice:
             "calendar_account", config["account_id"]
         ):
             raise ValueError("Calendar account changed. Re-enable attendance for this account.")
-        for row in sorted(
-            data.get("items", []), key=lambda item: datetime.fromisoformat(item["start"])
-        ):
-            if not is_valid_meet_link(row.get("url", "")):
-                continue
-            start, end = datetime.fromisoformat(row["start"]), datetime.fromisoformat(row["end"])
-            if start.tzinfo is None or end.tzinfo is None or end <= now:
-                continue
+        eligible = []
+        for row in data.get("items", []):
+            try:
+                start = datetime.fromisoformat(row["start"])
+                end = datetime.fromisoformat(row["end"])
+                if (
+                    not row.get("id") or not is_valid_meet_link(row.get("url", ""))
+                    or start.tzinfo is None or end.tzinfo is None or end <= start or end <= now
+                ):
+                    continue
+                eligible.append((start, end, row))
+            except (KeyError, TypeError, ValueError):
+                continue  # One malformed event must not block other meetings.
+        for start, end, row in sorted(eligible, key=lambda item: item[0]):
             owner = owner_key(config)
             key = hashlib.sha256((owner + row["id"] + start.isoformat()).encode()).hexdigest()
             with self.state.guard:
                 current = self.state.config.get("meet") or {}
                 if (
-                    not current.get("enabled")
+                    self.active
+                    or not current.get("enabled")
                     or current.get("device_token") != config.get("device_token")
                     or self.shutdown.is_set()
                 ):
@@ -213,6 +227,7 @@ class MeetDevice:
                 "WAITING_FOR_AUTH",
                 "KNOCKING",
                 "CANCELLED",
+                "CLOSED",
                 "UNVERIFIED",
                 "REVIEW_REQUIRED",
             }:
@@ -235,12 +250,14 @@ class MeetDevice:
 
     def pause(self):
         with self.state.guard:
-            if self.state.config.get("meet"):
-                self.revoke(dict(self.state.config["meet"]))
+            previous = dict(self.state.config.get("meet") or {})
+            if previous:
                 self.state.config["meet"].pop("device_token", None)
                 self.state.config["meet"]["enabled"] = False
                 self.state.save()
-        self.call_stop.set()
+            self.call_stop.set()
+        if previous.get("device_token"):
+            self.revoke(previous)
         return self.status()
 
     def status(self):
@@ -254,6 +271,8 @@ class MeetDevice:
             ]
             return {
                 "configured": bool(config.get("device_token")),
+                "account_id": config.get("account_id"),
+                "calendar_account": config.get("calendar_account"),
                 "enabled": bool(config.get("enabled")),
                 "active": bool(self.active),
                 "last_check": self.last_check,

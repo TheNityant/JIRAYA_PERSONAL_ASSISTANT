@@ -39,14 +39,22 @@ class CalendarClient:
         kwargs: dict[str, Any] = {
             "calendarId": calendar_id,
             "timeMin": time_min,
-            "maxResults": max(1, min(max_results, 100)),
+            "maxResults": max(1, min(max_results, 2500)),
             "singleEvents": True,
             "orderBy": "startTime",
         }
         if time_max:
             kwargs["timeMax"] = time_max
-        response = self.service.events().list(**kwargs).execute()
-        return list(response.get("items", []) or [])
+        items: list[dict[str, Any]] = []
+        limit = kwargs["maxResults"]
+        while True:
+            response = self.service.events().list(**kwargs).execute()
+            items.extend(response.get("items", []) or [])
+            page_token = response.get("nextPageToken")
+            if len(items) >= limit or not page_token:
+                return items[:limit]
+            kwargs["pageToken"] = page_token
+            kwargs["maxResults"] = limit - len(items)
 
     def get_event(self, *, calendar_id: str, event_id: str) -> dict[str, Any]:
         return self.service.events().get(calendarId=calendar_id, eventId=event_id).execute()

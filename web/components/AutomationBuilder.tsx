@@ -239,13 +239,6 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
     }));
   }
 
-  function updateContext(key: string, value: unknown) {
-    updateDraft((current) => ({
-      ...current,
-      context_config: { ...current.context_config, [key]: value },
-    }));
-  }
-
   function updateAction(key: string, value: unknown) {
     updateDraft((current) => ({
       ...current,
@@ -654,12 +647,6 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
             {(draft.source === "github" || ["CREATE_GITHUB_ISSUE", "CREATE_GITHUB_BRANCH"].includes(str(draft.action_config.type))) && <label>GitHub repository<input placeholder="TheNityant/repository-name" value={str(draft.action_config.repository)} onChange={(e) => updateAction("repository", e.target.value)}/></label>}
             <div className="section-divider" /><span className="section-title">Match {draft.source === "gmail" ? "incoming Gmail" : draft.source === "github" ? "GitHub changes" : "Calendar changes"}</span>
             <label>Semantic condition<textarea rows={5} placeholder="Example: A professor tells me an assignment/submission deadline." value={str(draft.match_config.semantic_condition)} onChange={(e) => updateMatch("semantic_condition", e.target.value)} /></label>
-            <div className="two-column">
-              {draft.source === "gmail" && <label>Sender contains<input value={str(draft.match_config.sender_contains)} onChange={(e) => updateMatch("sender_contains", e.target.value)} /></label>}
-              <label>{draft.source === "gmail" ? "Subject contains" : draft.source === "github" ? "Issue / workflow title contains" : "Event title contains"}<input value={str(draft.match_config.subject_contains)} onChange={(e) => updateMatch("subject_contains", e.target.value)} /></label>
-            </div>
-            <label>Body contains<input value={str(draft.match_config.body_contains)} onChange={(e) => updateMatch("body_contains", e.target.value)} /></label>
-            <label>Personal context / operating instructions<textarea rows={4} value={str(draft.context_config.instructions)} onChange={(e) => updateContext("instructions", e.target.value)} /></label>
             <div className="section-divider" /><span className="section-title">Action &amp; policy</span>
             <label>Action<select aria-label="Action" value={str(draft.action_config.type) || "DRAFT_REPLY"} onChange={(e) => updateAction("type", e.target.value)}>
               {!allowedActions.includes(str(draft.action_config.type)) && <option disabled value={str(draft.action_config.type)}>{actionLabels[str(draft.action_config.type)] || "Select an action"} · connection required</option>}

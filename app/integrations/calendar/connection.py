@@ -14,7 +14,7 @@ from app.services.connection_store import ConnectionStore
 from app.services.runtime_state_store import RuntimeStateStore
 
 
-def get_calendar_client(db: Session, settings: Settings) -> CalendarClient:
+def get_calendar_credentials(db: Session, settings: Settings) -> Credentials:
     store = ConnectionStore(db)
     connection = store.get_active(
         user_id=settings.dev_user_id,
@@ -54,4 +54,8 @@ def get_calendar_client(db: Session, settings: Settings) -> CalendarClient:
         )
     if not credentials.valid:
         raise CalendarConnectionError("Google Calendar credentials are no longer valid. Reconnect Calendar.")
-    return CalendarClient(credentials)
+    return credentials
+
+
+def get_calendar_client(db: Session, settings: Settings) -> CalendarClient:
+    return CalendarClient(get_calendar_credentials(db, settings))

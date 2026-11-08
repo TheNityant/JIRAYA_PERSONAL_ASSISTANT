@@ -22,6 +22,10 @@ router = APIRouter(tags=["meet"])
 @router.post("/meet/devices")
 def register_device(response: Response, db: Annotated[Session, Depends(get_db)]):
     settings = get_settings()
+    from app.models import CloudMeetSettings
+    preference = db.get(CloudMeetSettings, settings.dev_user_id)
+    if preference and preference.enabled:
+        raise HTTPException(409, "Pause cloud attendance before enabling attendance on this computer.")
     token = secrets.token_urlsafe(40)
     RuntimeStateStore(db).set(
         "meet-device:" + digest(token),

@@ -194,6 +194,12 @@ export type Account = {id: string; email: string; display_name: string};
 export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
 
 export const api = {
+  cloudMeetStatus: () => request<any>("/meet/cloud/status"),
+  cloudMeetSessions: () => request<{items:any[]}>("/meet/cloud/sessions"),
+  cloudMeetDetail: (id:string) => request<any>(`/meet/cloud/sessions/${encodeURIComponent(id)}`),
+  configureCloudMeet: (body:{enabled:boolean;consent:boolean;prefer_google_transcript:boolean;leave_on_speech:boolean}) => request<any>("/meet/cloud/settings",{method:"PUT",body:JSON.stringify(body)}),
+  cloudMeetAction: (id:string,action:"stop"|"summary"|"delete") => request<any>(`/meet/cloud/sessions/${encodeURIComponent(id)}${action==="delete"?"":"/"+action}`,{method:action==="delete"?"DELETE":"POST"}),
+  startMeetTranscriptConnection: () => request<{authorization_url:string}>("/connections/google/calendar/start?response_mode=json&meet_transcripts=true"),
   registerMeetDevice: () => request<{token:string}>("/meet/devices", {method:"POST"}),
   meetEvents: () => request<{items:Array<{id:string; summary:string; url:string; start:string; end:string}>; status:string; calendar_account?:string}>("/meet/device/events"),
   recentInbox: () => request<{items: Array<{id: string; subject: string; sender: string}>}>("/gmail/inbox/recent"),

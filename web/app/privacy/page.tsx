@@ -5,7 +5,7 @@ export const metadata: Metadata = {title: "Privacy Policy · Jiraya Personal Ass
 
 export default function PrivacyPage() {
   return <PolicyLayout title="Privacy Policy">
-    <p>Jiraya Personal Assistant is operated by Nityant Tiwari. It connects services you authorize to run personal automations, including email workflows, calendar scheduling, GitHub actions and optional local meeting attendance. This policy explains the information processed to provide those features.</p>
+    <p>Jiraya Personal Assistant is operated by Nityant Tiwari. It connects services you authorize to run personal automations, including email workflows, calendar scheduling, GitHub actions and optional local or cloud meeting attendance. This policy explains the information processed to provide those features.</p>
 
     <h2>Information we process</h2>
     <ul>
@@ -33,7 +33,11 @@ export default function PrivacyPage() {
 
     <h2>Local companion and Meet attendance</h2>
     <p>If you pair a local companion, your browser stores pairing details locally to reconnect that device. The companion stores local configuration, repository settings and, when enabled, a scoped device credential, meeting history and a dedicated Google browser profile. Local Git operations use credentials available on your computer. A requested push sends committed repository content to the configured Git remote.</p>
-    <p>Optional Meet attendance reads eligible Calendar meeting details through Jiraya and opens Google Meet on your paired computer. The current attendance feature does not record, transcribe, summarize or speak in the meeting. Browser sign-in and host admission may be required. Pausing attendance and leaving an active call are separate from closing the website. Local files and browser profiles are not removed merely by signing out of Jiraya.</p>
+    <p>Optional Meet attendance reads eligible Calendar meeting details through Jiraya and opens Google Meet on your paired computer. The local attendance feature does not record, transcribe, summarize or speak in the meeting. Browser sign-in and host admission may be required. Pausing attendance and leaving an active call are separate from closing the website. Local files and browser profiles are not removed merely by signing out of Jiraya.</p>
+
+    <h2>Optional cloud meeting notes</h2>
+    <p>If you explicitly enable cloud attendance, a server browser joins eligible Calendar meetings as a named Jiraya guest. Obtain permission from the organizer and participants before enabling transcription. The bot keeps its microphone and camera off. While admitted, meeting audio is transmitted to AssemblyAI for live speech recognition, including detection of explicit leave instructions when enabled. Diarization does not verify host identity. Raw audio is not saved by Jiraya; AssemblyAI processing and retention are governed by its service terms and the operator’s account settings.</p>
+    <p>With additional Google Meet authorization, Jiraya can retrieve a generated transcript that your connected account may access. It prefers that transcript for summaries and falls back to captured AssemblyAI text. Transcript text is sent to the configured Nebius inference service to generate notes, decisions and action items. Cloud transcripts and summaries are encrypted in the application database and purged by the running Meet worker after the configured retention period (seven days by default). You can delete a completed session’s stored notes from Meet. Purging requires the worker to be running; backups and provider-side records follow their own retention settings. Pausing cloud attendance requests active bots to leave and stops future joins; signing out alone does not pause attendance.</p>
 
     <h2>Storage, retention and security</h2>
     <p>OAuth credentials are encrypted in the application database and Jiraya passwords are stored as hashes. These protections do not eliminate all security risks. Account information, rules and execution records are retained to operate your workspace until removed through an available control or a deletion request is processed; there is currently no fixed automatic purge interval for all records.</p>

@@ -14,6 +14,7 @@ def build_calendar_oauth_flow(
     settings: Settings,
     *,
     state: str | None = None,
+    scopes: list[str] | None = None,
     code_verifier: str | None = None,
     autogenerate_code_verifier: bool = False,
 ) -> Flow:
@@ -33,7 +34,7 @@ def build_calendar_oauth_flow(
                 "redirect_uris": [settings.google_calendar_oauth_redirect_uri],
             }
         },
-        scopes=GOOGLE_CALENDAR_SCOPES,
+        scopes=scopes or GOOGLE_CALENDAR_SCOPES,
         state=state,
         code_verifier=code_verifier,
         autogenerate_code_verifier=autogenerate_code_verifier,

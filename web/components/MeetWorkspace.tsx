@@ -3,12 +3,14 @@ import {useCallback, useEffect, useState} from "react";
 import {api, API_BASE} from "@/lib/api";
 import ServiceIcon from "./ServiceIcon";
 import WorkspaceCheckpoint from "./WorkspaceCheckpoint";
+import CloudMeetWorkspace from "./CloudMeetWorkspace";
 
 type DeviceStatus = {configured:boolean; account_id?:string|null; calendar_account?:string|null; enabled:boolean; active:boolean; last_check:string|null; error:string|null; recent:Array<{key?:string; event_id:string; status:string; reason?:string; start:string}>};
 type Meeting = {id:string; summary:string; url:string; start:string; end:string};
 const retryable = ["FAILED","WAITING_FOR_AUTH","KNOCKING","CANCELLED","CLOSED","UNVERIFIED","REVIEW_REQUIRED"];
 
 export default function MeetWorkspace({accountId, calendarConnected, onConnectCalendar}: {accountId:string; calendarConnected:boolean; onConnectCalendar:()=>void}) {
+  const [cloud,setCloud]=useState(true);
   const [paired,setPaired]=useState(false);
   const [device,setDevice]=useState<DeviceStatus|null>(null);
   const [calendarAccount,setCalendarAccount]=useState("");
@@ -38,6 +40,7 @@ export default function MeetWorkspace({accountId, calendarConnected, onConnectCa
     return data;
   },[accountId]);
   useEffect(()=>{
+    if(cloud)return;
     let cancelled=false, checking=false;
     const refresh=async()=>{
       if(checking)return;checking=true;
@@ -53,7 +56,7 @@ export default function MeetWorkspace({accountId, calendarConnected, onConnectCa
       }finally{checking=false;}
     };
     void refresh();const timer=setInterval(refresh,20000);return()=>{cancelled=true;clearInterval(timer);};
-  },[paired,revision,local]);
+  },[paired,revision,local,cloud]);
   const otherAccount=!!device?.configured&&device.account_id!==accountId;
   const otherCalendar=!!device?.configured&&!otherAccount&&!!calendarAccount&&!!device.calendar_account&&device.calendar_account!==calendarAccount;
   const ownDevice=otherAccount||otherCalendar?null:device;
@@ -69,8 +72,15 @@ export default function MeetWorkspace({accountId, calendarConnected, onConnectCa
   }
   async function pause(){setBusy(true);setActionError("");try{setDevice(await local("/meeting/pause","POST"));setConsent(false);}catch(e:any){setActionError(e.message);}finally{setBusy(false);}}
   async function retry(key:string){setBusy(true);setActionError("");try{setDevice(await local("/meeting/retry","POST",{key}));}catch(e:any){setActionError(e.message);}finally{setBusy(false);}}
+  async function switchToCloud(){
+    setBusy(true);setActionError("");
+    try{if(ownDevice?.enabled)setDevice(await local("/meeting/pause","POST"));setCloud(true);}
+    catch(e:any){setActionError(e.message);}finally{setBusy(false);}
+  }
+  if(cloud)return <CloudMeetWorkspace onLocal={()=>setCloud(false)} onConnectCalendar={onConnectCalendar} calendarConnected={calendarConnected}/>;
   return <section className="service-workspace meet-workspace">
     <header className="section-header"><div><span className="eyebrow">Calendar → Google Meet</span><h1>Meet attendance</h1><p>Join scheduled meetings from your primary Calendar using this computer.</p></div><button className="secondary-button" disabled={busy} onClick={()=>setRevision(v=>v+1)}>Refresh</button></header>
+    <p><button className="primary-button" disabled={busy} onClick={switchToCloud}>Cloud attendance and summaries</button> · Run without keeping this computer on.</p>
     <WorkspaceCheckpoint accountId={accountId} purpose="meet" onPairingChange={onPairingChange}/>
     <div className="meet-setup"><div className="meet-setup-icon"><ServiceIcon service="google_calendar" size={34}/><span>→</span><ServiceIcon service="meet" size={34}/></div><h2>Your meeting, at the right time.</h2><p>Gmail automations can create an event with its meeting link. The paired device checks Calendar every 20 seconds and attempts attendance near the event’s start.</p>
       <ol><li>Connect Google Calendar. Connect Gmail as well if your events come from email automations.</li><li>Create a Calendar event with one valid Google Meet link.</li><li>Pair this computer above and enable attendance below. The host may need to admit you.</li></ol>

@@ -42,7 +42,7 @@ def _record_health(db: Session, *, user_id: str, status: str, detail: str | None
 
 
 @router.get("/connections/google/calendar/start")
-def start_calendar_connection(response_mode: str | None = Query(default=None), db: Session = Depends(get_db)):
+def start_calendar_connection(response_mode: str | None = Query(default=None), meet_transcripts: bool = False, db: Session = Depends(get_db)):
     settings = get_settings()
     store = ConnectionStore(db)
     store.ensure_user(user_id=settings.dev_user_id, email=settings.dev_user_email)
@@ -56,6 +56,7 @@ def start_calendar_connection(response_mode: str | None = Query(default=None), d
             settings,
             state=state_record.state,
             autogenerate_code_verifier=True,
+            **({"scopes": GOOGLE_CALENDAR_SCOPES + ["https://www.googleapis.com/auth/meetings.space.readonly"]} if meet_transcripts else {}),
         )
         authorization_url, _ = flow.authorization_url(
             access_type="offline",
@@ -64,7 +65,7 @@ def start_calendar_connection(response_mode: str | None = Query(default=None), d
         verifier = str(flow.code_verifier or "")
         if not verifier:
             raise RuntimeError("Google Calendar OAuth PKCE verifier was not generated.")
-        RuntimeStateStore(db).set(_pkce_key(state_record.state), {"code_verifier": verifier})
+        RuntimeStateStore(db).set(_pkce_key(state_record.state), {"code_verifier": verifier, "meet_transcripts": meet_transcripts})
         _record_health(db, user_id=settings.dev_user_id, status="AUTHORIZING")
         if response_mode == "json":
             return {"authorization_url": authorization_url}
@@ -110,6 +111,7 @@ def calendar_connection_callback(
             state=state,
             code_verifier=verifier,
             autogenerate_code_verifier=False,
+            **({"scopes": GOOGLE_CALENDAR_SCOPES + ["https://www.googleapis.com/auth/meetings.space.readonly"]} if verifier_state.get("meet_transcripts") else {}),
         )
         flow.fetch_token(code=code)
         credentials = flow.credentials

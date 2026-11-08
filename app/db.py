@@ -44,10 +44,22 @@ class TenantSession(Session):
 def _tenant_queries(state):
     tenant = state.session.info.get("tenant_id")
     if tenant and (state.is_select or state.is_update or state.is_delete):
-        from app.models import Connection, Notification, OAuthState
-        from app.models import Event, Action, Obligation, Automation, AutomationExecution
+        from app.models import (
+            Action,
+            Automation,
+            AutomationExecution,
+            CloudMeetSession,
+            CloudMeetSettings,
+            Connection,
+            Event,
+            Notification,
+            OAuthState,
+            Obligation,
+        )
 
         for model in (
+            CloudMeetSettings,
+            CloudMeetSession,
             Event,
             Action,
             Obligation,
@@ -67,7 +79,7 @@ def _tenant_writes(session, *_):
     tenant = session.info.get("tenant_id")
     if not tenant:
         return
-    from app.models import Owned, Connection, Notification, OAuthState
+    from app.models import Connection, Notification, OAuthState, Owned
 
     for obj in session.new | session.dirty | session.deleted:
         if isinstance(obj, (Owned, Connection, Notification, OAuthState)):
@@ -93,6 +105,7 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     from app.models import (  # noqa: F401
         Action,
+        AuthSession,
         Automation,
         AutomationExecution,
         Connection,
@@ -103,8 +116,6 @@ def init_db() -> None:
         RuntimeState,
         User,
     )
-
-    from app.models import AuthSession  # noqa: F401
 
     # Additive upgrade retains the old local workspace under its original identity.
     with engine.begin() as connection:

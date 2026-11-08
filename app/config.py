@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     nebius_model: str = "nvidia/Nemotron-3_5-Lightning"
     nebius_timeout_seconds: float = 60.0
 
+    # Cloud Meet is opt-in and runs in a separate browser/audio worker container.
+    meet_cloud_enabled: bool = False
+    meet_cloud_max_minutes: int = Field(default=120, ge=5, le=240)
+    meet_cloud_retention_days: int = Field(default=7, ge=1, le=30)
+    assemblyai_api_key: str = Field(default="", repr=False)
+    assemblyai_speech_model: str = "universal-streaming-english"
+
     # Operator-configured, single-account Hermes briefing pilot. End users never
     # receive this service credential or configure their own backend endpoint.
     hermes_briefing_enabled: bool = False

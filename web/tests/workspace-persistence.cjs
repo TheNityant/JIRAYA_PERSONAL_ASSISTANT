@@ -106,7 +106,7 @@ async function main(){
   const panel=page.getByRole('region',{name:'Local workspace checkpoint'});
   await panel.getByText('Companion connected',{exact:true}).waitFor();await panel.getByText('2 open Git projects · 2 enabled',{exact:true}).waitFor();
   assert.equal(claims,1);assert.equal(await page.evaluate(()=>!!localStorage.getItem('jiraya.companion:saved-user')),true);
-  await page.getByRole('button',{name:'Meet',exact:true}).click();await page.getByRole('heading',{name:'Meet attendance',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Meet',exact:true}).click();await page.getByRole('button',{name:'Use this computer instead',exact:true}).click();await page.getByRole('heading',{name:'Meet attendance',exact:true}).waitFor();
   const enable=page.getByRole('button',{name:'Enable automatic attendance',exact:true});assert.equal(await enable.isEnabled(),false);
   await page.getByRole('checkbox').check();await enable.click();await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
   if(process.env.JIRAYA_MEET_SCREENSHOT)await page.screenshot({path:process.env.JIRAYA_MEET_SCREENSHOT});

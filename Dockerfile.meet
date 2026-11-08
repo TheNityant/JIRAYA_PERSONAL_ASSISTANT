@@ -1,0 +1,14 @@
+# Separate background worker. Do not replace the existing FastAPI Dockerfile.
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY app ./app
+RUN apt-get update && apt-get install -y --no-install-recommends pulseaudio ffmpeg tini && \
+    pip install --no-cache-dir '.[cloud-meet]' && \
+    python -m playwright install --with-deps chromium && \
+    useradd --create-home jiraya && chmod -R a+rX /ms-playwright && \
+    rm -rf /var/lib/apt/lists/*
+USER jiraya
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sh", "-c", "pulseaudio --daemonize=yes --exit-idle-time=-1 && exec python -m app.meet_cloud.worker"]

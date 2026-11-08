@@ -237,3 +237,32 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class CloudMeetSettings(Owned, Base):
+    __tablename__ = "cloud_meet_settings"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CloudMeetSession(Owned, Base):
+    __tablename__ = "cloud_meet_sessions"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(255))
+    calendar_account: Mapped[str] = mapped_column(String(255))
+    meeting_url: Mapped[str] = mapped_column(String(2048))
+    title: Mapped[str] = mapped_column(String(500))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40), default="QUEUED", index=True)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    worker_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transcript_ciphertext: Mapped[str] = mapped_column(Text, default="")
+    summary_ciphertext: Mapped[str] = mapped_column(Text, default="")
+    summary_state: Mapped[str] = mapped_column(String(40), default="NONE", index=True)
+    summary_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

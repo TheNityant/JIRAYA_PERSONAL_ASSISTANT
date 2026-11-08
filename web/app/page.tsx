@@ -12,7 +12,7 @@ const services = [
   {id: "gmail", name: "Gmail", detail: "Match incoming email against your instructions and prepare or send replies according to your approval settings."},
   {id: "google_calendar", name: "Google Calendar", detail: "Create events from meeting emails, check availability in configured scheduling workflows and monitor event changes."},
   {id: "github", name: "GitHub", detail: "Watch issue, pull request and workflow changes, and configure supported repository actions. Pair local tools for Git checkpoints."},
-  {id: "meet", name: "Google Meet attendance", detail: "Opt a paired computer into attending eligible Calendar meetings. The computer must stay awake; browser sign-in and host admission may be needed."},
+  {id: "meet", name: "Google Meet attendance", detail: "Opt into cloud meeting attendance and notes when the operator has deployed its worker, or use a paired computer for local attendance. Host admission may be needed."},
 ];
 
 export default async function Home({searchParams}: {searchParams: Promise<Record<string, string | string[] | undefined>>}) {
@@ -55,7 +55,7 @@ export default async function Home({searchParams}: {searchParams: Promise<Record
       <section id="services" className="landing-section">
         <span className="eyebrow">Connect what you use</span><h2>Services with a specific job to do.</h2><p className="landing-section-intro">Choose your connections separately. Connecting one service does not authorize every other service.</p>
         <div className="landing-service-grid">{services.map(service => <article key={service.id}><span className={`landing-service-icon ${service.id}`}><ServiceIcon service={service.id} size={25}/></span><h3>{service.name}</h3><p>{service.detail}</p></article>)}</div>
-        <p className="landing-caption">Current Meet functionality is attendance only. Recording, transcription and voice participation are not enabled.</p>
+        <p className="landing-caption">Optional cloud Meet notes transcribe admitted meetings with AssemblyAI and summarize available Google or captured transcripts. Cloud mode requires its own worker and explicit consent; voice participation is not enabled.</p>
       </section>
       <section id="how-it-works" className="landing-section">
         <span className="eyebrow">From setup to execution</span><h2>You set the rules and approval policy.</h2>
@@ -66,7 +66,7 @@ export default async function Home({searchParams}: {searchParams: Promise<Record
         </div>
       </section>
       <section className="landing-data landing-section" aria-labelledby="landing-data-title">
-        <div><span className="eyebrow">Your data and permissions</span><h2 id="landing-data-title">Know what you are connecting.</h2><p>Jiraya processes authorized email, Calendar and GitHub information to run the features you configure. Relevant email content and instructions may be sent to Nebius Token Factory for AI inference. Account, connection and automation records are stored to operate your workspace.</p><p>Enabled cloud automations can continue after you close the website. Local Git and Meet operations require a running companion on your computer. Provider authorization, availability and organization policies can affect access.</p></div>
+        <div><span className="eyebrow">Your data and permissions</span><h2 id="landing-data-title">Know what you are connecting.</h2><p>Jiraya processes authorized email, Calendar and GitHub information to run the features you configure. Relevant email content and instructions may be sent to Nebius Token Factory for AI inference. Account, connection and automation records are stored to operate your workspace.</p><p>Enabled cloud automations can continue after you close the website. Local Git and local Meet attendance require a running companion; cloud Meet attendance requires a dedicated running cloud worker. Provider authorization, availability and organization policies can affect access.</p></div>
         <div className="landing-data-links"><Link href="/privacy">Read the Privacy Policy ↗</Link><Link href="/terms">Read the Terms of Service ↗</Link><a href="mailto:nityant.tiwari2404@gmail.com">Contact the operator ↗</a></div>
       </section>
     </main>

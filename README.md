@@ -245,9 +245,9 @@ Those come after this vertical slice is reliable.
 
 The GitHub workspace now includes an opt-in local workspace checkpoint: one button commits saved changes and pushes enabled open repositories to their configured branches. It uses a separately started local companion and the included VS Code extension, so a deployed cloud backend never needs access to your desktop folders. See [setup, supported IDEs and checkpoint behavior](docs/WORKSPACE_CHECKPOINT.md).
 
-## Optional Hermes developer briefing
+## Optional GitHub developer briefing
 
-The GitHub workspace can summarize recent activity across up to three repositories through a dedicated, operator-configured Hermes profile. It defaults to disabled and does not execute suggested actions. See [Hermes briefing setup and multi-repository tests](docs/HERMES_BRIEFING.md).
+The GitHub workspace can summarize recent activity across up to three repositories through BharatCode or a dedicated Hermes profile. Both default to disabled and do not execute suggested actions. Only activity metadata is sent, never source code or GitHub credentials. See [BharatCode setup](docs/BHARATCODE_BRIEFING.md) or [Hermes pilot setup](docs/HERMES_BRIEFING.md).
 
 ## Calendar-backed scheduling replies
 

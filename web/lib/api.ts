@@ -94,7 +94,7 @@ export type ConnectionsResponse = {
 export type CalendarEvent = {id: string; status?: string; summary?: string; htmlLink?: string; recurringEventId?: string; location?: string; description?: string; start?: {dateTime?: string; date?: string}; end?: {dateTime?: string; date?: string}};
 export type GithubRepository = {id: number; full_name: string; html_url: string; default_branch: string; private: boolean};
 export type DeveloperBriefingResult = {
-  run_id: string | null; provider: "hermes" | "none"; summary: string; generated_at: string;
+  run_id: string | null; provider: "hermes" | "bharatcode" | "none"; summary: string; generated_at: string;
   repositories: string[]; scope: string;
   sources: Array<{id: string; repository: string; kind: string; title: string; url: string}>;
   coverage: Array<{repository: string; kind: string; loaded?: number; limit?: number; error?: string}>;
@@ -203,7 +203,7 @@ export const api = {
   registerMeetDevice: () => request<{token:string}>("/meet/devices", {method:"POST"}),
   meetEvents: () => request<{items:Array<{id:string; summary:string; url:string; start:string; end:string}>; status:string; calendar_account?:string}>("/meet/device/events"),
   recentInbox: () => request<{items: Array<{id: string; subject: string; sender: string}>}>("/gmail/inbox/recent"),
-  developerBriefingStatus: () => request<{configured: boolean; message: string}>("/github/briefing/status"),
+  developerBriefingStatus: () => request<{configured: boolean; message: string; provider: "hermes" | "bharatcode"}>("/github/briefing/status"),
   createDeveloperBriefing: (repositories: string[]) => request<DeveloperBriefingResult>("/github/briefing", {method: "POST", signal: AbortSignal.timeout(180000), body: JSON.stringify({repositories})}),
   account: () => request<AccountState>("/auth/me"),
   login: (email: string, password: string) => request<{user: Account}>("/auth/login", {method: "POST", body: JSON.stringify({email, password})}),

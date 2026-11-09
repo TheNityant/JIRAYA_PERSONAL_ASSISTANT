@@ -348,3 +348,136 @@ def test_timeout_and_oversized_response_are_bounded_and_redacted():
             client.check_read_only_profile()
     finally:
         client.close()
+
+
+@pytest.fixture
+def bharat(pilot, monkeypatch):
+    from app.providers.bharatcode import BharatCodeClient
+
+    pilot.settings.github_briefing_provider = "bharatcode"
+    pilot.settings.bharatcode_briefing_enabled = True
+    pilot.settings.bharatcode_api_key = "private-bharat-key"
+    pilot.behavior.update(code=200, mode="text")
+    pilot.bharat_requests = []
+
+    def respond(request):
+        pilot.bharat_requests.append(request)
+        assert request.url == "https://bharatcode.ai/api/model/v1/chat/completions"
+        assert request.headers["Authorization"] == "Bearer private-bharat-key"
+        if pilot.behavior["mode"] == "timeout":
+            raise httpx.ReadTimeout("SECRET-UPSTREAM-BODY", request=request)
+        if pilot.behavior["code"] != 200:
+            return httpx.Response(pilot.behavior["code"], text="SECRET-UPSTREAM-BODY")
+        if pilot.behavior["mode"] == "oversize":
+            return httpx.Response(200, content=b"x" * 128_001)
+        if pilot.behavior["mode"] == "invalid":
+            return httpx.Response(200, json={"unexpected": "SECRET-UPSTREAM-BODY"})
+        if pilot.behavior["mode"] == "invalid_choice":
+            return httpx.Response(200, json={"choices": ["SECRET-UPSTREAM-BODY"]})
+        if pilot.behavior["mode"] == "invalid_message":
+            return httpx.Response(200, json={"choices": [{"message": "SECRET-UPSTREAM-BODY"}]})
+        message = {"content": "Needs attention: review CI [S3]."}
+        if pilot.behavior["mode"] == "tools":
+            message["tool_calls"] = [{"id": "not-executed", "function": {"name": "push"}}]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": pilot.behavior["finish"],
+                        "message": message,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        route,
+        "BharatCodeClient",
+        lambda settings: BharatCodeClient(settings, transport=httpx.MockTransport(respond)),
+    )
+    return pilot
+
+
+def test_bharatcode_briefing_uses_selected_metadata_without_hermes(bharat):
+    status = bharat.client.get("/github/briefing/status").json()
+    assert status["configured"] and status["provider"] == "bharatcode"
+    response = bharat.client.post("/github/briefing", json={"repositories": ["owner/a", "owner/b"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["provider"] == "bharatcode"
+    assert len(bharat.calls) == 6 and not bharat.upstream
+    assert len(bharat.bharat_requests) == 1
+    request = bharat.bharat_requests[0]
+    payload = json.loads(request.content)
+    assert payload["model"] == "qwen-3.8-27b"
+    assert payload["tools"] == [] and payload["tool_choice"] == "none"
+    assert payload["store"] is False and payload["stream"] is False
+    assert payload["reasoning_effort"] == "none"
+    assert request.headers["Idempotency-Key"] == response.json()["run_id"]
+    assert "DO-NOT-SEND" not in request.content.decode()
+    assert "github-user-token" not in request.content.decode()
+    assert "private-bharat-key" not in response.text
+
+
+def test_bharatcode_disabled_or_missing_key_never_reads_github(bharat):
+    for flag, key in ((False, "key"), (True, "")):
+        bharat.settings.bharatcode_briefing_enabled = flag
+        bharat.settings.bharatcode_api_key = key
+        assert not bharat.client.get("/github/briefing/status").json()["configured"]
+        assert (
+            bharat.client.post("/github/briefing", json={"repositories": ["owner/a"]}).status_code
+            == 503
+        )
+    assert not bharat.calls and not bharat.bharat_requests
+
+
+def test_bharatcode_empty_snapshot_does_not_call_model(bharat):
+    bharat.behavior["empty"] = True
+    result = bharat.client.post("/github/briefing", json={"repositories": ["owner/a"]})
+    assert result.status_code == 200 and result.json()["provider"] == "none"
+    assert not bharat.bharat_requests
+
+
+@pytest.mark.parametrize(
+    "code,mode,finish",
+    [
+        (401, "text", "stop"),
+        (403, "text", "stop"),
+        (429, "text", "stop"),
+        (503, "text", "stop"),
+        (302, "text", "stop"),
+        (200, "timeout", "stop"),
+        (200, "invalid", "stop"),
+        (200, "invalid_choice", "stop"),
+        (200, "invalid_message", "stop"),
+        (200, "oversize", "stop"),
+        (200, "tools", "stop"),
+        (200, "text", "length"),
+    ],
+)
+def test_bharatcode_failure_does_not_leak_retry_or_fallback(bharat, code, mode, finish):
+    bharat.behavior.update(code=code, mode=mode, finish=finish)
+    response = bharat.client.post("/github/briefing", json={"repositories": ["owner/a"]})
+    assert response.status_code == 502
+    assert "SECRET-UPSTREAM-BODY" not in response.text
+    assert "private-bharat-key" not in response.text
+    assert len(bharat.bharat_requests) == 1 and not bharat.upstream
+    assert not route.briefing_lock.locked()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://bharatcode.ai/api/model/v1",
+        "https://user:secret@bharatcode.ai/v1",
+        "https://bharatcode.ai/v1?key=secret",
+        "https://bharatcode.ai/wrong",
+    ],
+)
+def test_bharatcode_rejects_bad_endpoint_before_reading_github(bharat, url):
+    bharat.settings.bharatcode_base_url = url
+    assert (
+        bharat.client.post("/github/briefing", json={"repositories": ["owner/a"]}).status_code
+        == 502
+    )
+    assert not bharat.calls and not bharat.bharat_requests

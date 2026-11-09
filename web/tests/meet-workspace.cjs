@@ -55,7 +55,7 @@ export default function Page(){const [connected,setConnected]=useState(true);ret
     assert.equal(registrations,0,'Opening cloud controls must not enable local attendance');
     assert.equal(cloudPauses,0,'Opening controls must not change consent');
     await page.getByRole('button',{name:'Use this computer instead',exact:true}).click();
-    assert.equal(await page.getByRole('button',{name:'Cloud attendance and summaries',exact:true}).count(),1);
+    await page.getByRole('button',{name:'Cloud attendance and summaries',exact:true}).waitFor();
     const pairing=page.getByRole('region',{name:'Meet device pairing'});
     await pairing.getByRole('button',{name:'Connect with VS Code',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:/Pair this computer in GitHub/}).count(),0);

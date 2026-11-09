@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     assemblyai_api_key: str = Field(default="", repr=False)
     assemblyai_speech_model: str = "universal-streaming-english"
 
+    github_briefing_provider: Literal["hermes", "bharatcode"] = "hermes"
+    bharatcode_briefing_enabled: bool = False
+    bharatcode_api_key: str = Field(default="", repr=False)
+    bharatcode_base_url: str = "https://bharatcode.ai/api/model/v1"
+    bharatcode_model: str = "qwen-3.8-27b"
+    bharatcode_timeout_seconds: float = Field(default=60, ge=5, le=90)
+
     # Operator-configured, single-account Hermes briefing pilot. End users never
     # receive this service credential or configure their own backend endpoint.
     hermes_briefing_enabled: bool = False

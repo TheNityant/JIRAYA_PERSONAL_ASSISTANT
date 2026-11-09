@@ -40,7 +40,8 @@ async function main(){
    try{const [front,back]=await Promise.all([fetch(url),fetch('http://127.0.0.1:8000/github/briefing/status')]);if(front.ok&&back.ok)break;}catch{}
    if(attempt>120)throw Error(`Test services failed to start:\n${logs}`);await new Promise(resolve=>setTimeout(resolve,500));
   }
-  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE_PATH?{executablePath:process.env.CHROMIUM_EXECUTABLE_PATH}:{})});
+  const launch={headless:true};if(process.env.JIRAYA_SPARTICUZ){const {default:binary}=await import(process.env.JIRAYA_SPARTICUZ);launch.executablePath=await binary.executablePath();launch.args=binary.args;}else if(process.env.CHROMIUM_EXECUTABLE_PATH)launch.executablePath=process.env.CHROMIUM_EXECUTABLE_PATH;
+  browser=await chromium.launch(launch);
   const page=await browser.newPage({viewport:{width:1280,height:1000}});await page.goto(url);
   await page.getByText('Hermes is configured.',{exact:false}).waitFor();
   assert.equal(turns.length,0,'Opening the panel must not invoke inference');
@@ -66,6 +67,17 @@ async function main(){
   assert.equal(await page.getByText('PRIVATE-UPSTREAM-ERROR',{exact:false}).count(),0);
   assert.equal(turns.length,2,'No automatic model retries');
   console.log('PASS: selection limit, no inference on page load, safe rendering, sources, mobile and error recovery');
+  // Provider-specific UI uses controlled API fixtures; Python tests exercise the real BharatCode adapter.
+  await page.route('**/github/briefing/status',route=>route.fulfill({json:{configured:true,provider:'bharatcode',message:'BharatCode is configured for read-only GitHub activity briefings.',max_repositories:3}}));
+  let bharatCalls=0;
+  await page.route('**/github/briefing',route=>{bharatCalls++;return route.fulfill({json:{provider:'bharatcode',run_id:'fixture',repositories:['owner/jiraya','owner/notebook'],generated_at:new Date().toISOString(),summary:'Needs attention: review the linked CI [S1].',scope:'Selected activity metadata',coverage:[],sources:[]}});});
+  await page.getByRole('button',{name:'Check configuration',exact:true}).click();
+  await page.getByText('BharatCode is configured',{exact:false}).waitFor();
+  await page.getByText('No code, issue bodies, comments or GitHub credentials are sent.',{exact:false}).waitFor();
+  assert.equal(bharatCalls,0);
+  await generate.click();await page.getByRole('heading',{name:'BharatCode briefing',exact:true}).waitFor();
+  assert.equal(bharatCalls,1);
+  console.log('PASS: BharatCode provider selection, disclosure and result rendering (controlled API fixture)');
  }finally{
   fs.rmSync(route,{recursive:true,force:true});fs.rmSync(state,{recursive:true,force:true});
   fs.rmSync(path.join(web,'.next','types','app','briefing-regression-harness'),{recursive:true,force:true});

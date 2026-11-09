@@ -12,11 +12,13 @@ from app.db import get_db
 from app.integrations.github.connection import get_github_client
 from app.integrations.github.errors import github_error
 from app.integrations.github.validation import repository_parts
+from app.providers.bharatcode import BharatCodeClient, BharatCodeProblem
+from app.providers.bharatcode import briefing_configuration as bharatcode_configuration
 from app.providers.hermes import HermesClient, HermesProblem, briefing_configuration
 from app.services.developer_briefing import collect_snapshot
 
 router = APIRouter(prefix="/github/briefing", tags=["developer-briefing"])
-# Pilot: one API process, one owner and one briefing at a time, not a durable job queue.
+# One briefing per API process at a time; Hermes remains an owner-only pilot.
 briefing_lock = threading.Lock()
 
 
@@ -36,13 +38,25 @@ class BriefingRequest(BaseModel):
         return repositories
 
 
+def configuration_problem(settings):
+    if settings.github_briefing_provider == "bharatcode":
+        return bharatcode_configuration(settings)
+    return briefing_configuration(settings)
+
+
 @router.get("/status")
 def status():
-    problem = briefing_configuration(get_settings())
+    settings = get_settings()
+    problem = configuration_problem(settings)
     return {
         "configured": problem is None,
+        "provider": settings.github_briefing_provider,
         "message": problem
-        or "Hermes is configured. Its dedicated profile is checked before each briefing.",
+        or (
+            "BharatCode is configured for read-only GitHub activity briefings."
+            if settings.github_briefing_provider == "bharatcode"
+            else "Hermes is configured. Its dedicated profile is checked before each briefing."
+        ),
         "max_repositories": 3,
     }
 
@@ -50,15 +64,18 @@ def status():
 @router.post("")
 def create_briefing(request: BriefingRequest, db: Annotated[Session, Depends(get_db)]):
     settings = get_settings()
-    problem = briefing_configuration(settings)
+    problem = configuration_problem(settings)
     if problem:
         raise HTTPException(503, problem)
     if not briefing_lock.acquire(blocking=False):
         raise HTTPException(409, "A briefing is already running. Wait before starting another.")
-    hermes = github = None
+    provider = github = None
     try:
-        hermes = HermesClient(settings)
-        hermes.check_read_only_profile()
+        if settings.github_briefing_provider == "bharatcode":
+            provider = BharatCodeClient(settings)
+        else:
+            provider = HermesClient(settings)
+            provider.check_read_only_profile()
         try:
             github = get_github_client(db, settings)  # Identity comes from the signed-in session.
             github.client.timeout = httpx.Timeout(8.0)
@@ -72,12 +89,17 @@ def create_briefing(request: BriefingRequest, db: Annotated[Session, Depends(get
                 **snapshot,
                 "run_id": None,
                 "provider": "none",
-                "summary": "No activity was available to summarize. Review the coverage details. No Hermes briefing was requested.",
+                "summary": "No activity was available to summarize. Review the coverage details. No AI briefing was requested.",
             }
         run_id = str(uuid4())
-        summary = hermes.brief(snapshot, run_id)
-        return {**snapshot, "run_id": run_id, "provider": "hermes", "summary": summary}
-    except HermesProblem as exc:
+        summary = provider.brief(snapshot, run_id)
+        return {
+            **snapshot,
+            "run_id": run_id,
+            "provider": settings.github_briefing_provider,
+            "summary": summary,
+        }
+    except (HermesProblem, BharatCodeProblem) as exc:
         raise HTTPException(502, str(exc)) from exc
     finally:
         try:
@@ -85,7 +107,7 @@ def create_briefing(request: BriefingRequest, db: Annotated[Session, Depends(get
                 github.close()
         finally:
             try:
-                if hermes:
-                    hermes.close()
+                if provider:
+                    provider.close()
             finally:
                 briefing_lock.release()

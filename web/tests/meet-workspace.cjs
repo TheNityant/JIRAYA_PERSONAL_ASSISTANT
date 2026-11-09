@@ -22,12 +22,13 @@ export default function Page(){const [connected,setConnected]=useState(true);ret
     if(process.env.JIRAYA_SPARTICUZ){const {default:binary}=await import(process.env.JIRAYA_SPARTICUZ);launch.executablePath=await binary.executablePath();launch.args=binary.args;}
     browser=await chromium.launch(launch);
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
-    let feedStatus='READY', helperStatus=200, offline=false, gitRequests=0, registrations=0, connects=0;
+    let feedStatus='READY', helperStatus=200, offline=false, gitRequests=0, registrations=0, connects=0, cloudEnabled=true, cloudPauses=0;
     let device={configured:false,enabled:false,active:false,account_id:null,last_check:null,error:null,recent:[]};
     await page.route('**/api/jiraya/meet/**',async route=>{
-      if(route.request().url().includes('/meet/cloud/status'))return route.fulfill({json:{configured:false,worker_online:false,enabled:false,preferences:{},google_transcript_authorized:false}});
+      if(route.request().url().includes('/meet/cloud/status'))return route.fulfill({json:{configured:false,worker_online:false,enabled:cloudEnabled,preferences:{},google_transcript_authorized:false}});
       if(route.request().url().includes('/meet/cloud/sessions'))return route.fulfill({json:{items:[]}});
-      if(route.request().url().endsWith('/meet/devices')){registrations++;return route.fulfill({json:{token:'scoped-fixture-token'}});}
+      if(route.request().url().endsWith('/meet/cloud/settings')){assert.equal(route.request().postDataJSON().enabled,false);cloudEnabled=false;cloudPauses++;return route.fulfill({json:{enabled:false}});}
+      if(route.request().url().endsWith('/meet/devices')){assert.equal(cloudEnabled,false,'Pause old cloud attendance before local registration');registrations++;return route.fulfill({json:{token:'scoped-fixture-token'}});}
       return route.fulfill({json:{status:feedStatus,calendar_account:'calendar@example.test',items:feedStatus==='READY'?[{id:'meeting',summary:'Fixture linked meeting',url:'https://meet.google.com/abc-defg-hij',start:'2026-11-08T12:30:00Z',end:'2026-11-08T13:30:00Z'}]:[]}});
     });
     await page.route('http://127.0.0.1:8765/**',async route=>{
@@ -50,7 +51,7 @@ export default function Page(){const [connected,setConnected]=useState(true);ret
       return respond({detail:'Unexpected route'},404);
     });
     await page.goto(url);
-    await page.getByRole('button',{name:'Use this computer instead',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:'Cloud attendance and summaries',exact:true}).count(),0);
     const pairing=page.getByRole('region',{name:'Meet device pairing'});
     await pairing.getByRole('button',{name:'Connect with VS Code',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:/Pair this computer in GitHub/}).count(),0);
@@ -64,8 +65,8 @@ export default function Page(){const [connected,setConnected]=useState(true);ret
     const enable=page.getByRole('button',{name:'Enable automatic attendance',exact:true});
     await consent.check();await enable.click();
     await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
-    assert.equal(connects,1);assert.equal(registrations,1);assert.equal(gitRequests,0);
-    await page.reload();await page.getByRole('button',{name:'Use this computer instead',exact:true}).click();await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
+    assert.equal(connects,1);assert.equal(registrations,1);assert.equal(gitRequests,0);assert.equal(cloudPauses,1);
+    await page.reload();await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
     assert.equal(connects,1,'Reload must reuse pairing and not register another device');
     device.recent=[{key:'retry-key',event_id:'meeting',status:'CLOSED',reason:'BROWSER_WINDOW_CLOSED',start:'2026-11-08T12:30:00Z'}];
     await page.getByRole('button',{name:'Refresh',exact:true}).click();

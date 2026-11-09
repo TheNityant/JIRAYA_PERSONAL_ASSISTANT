@@ -25,15 +25,14 @@ See [service integrations and deployment](docs/SERVICE_INTEGRATIONS.md#frontend-
 for account sessions, connection setup, production URLs and existing-workspace handling.
 The sections below retain the original Phase 1 standalone CLI workflow for reference.
 
-## Optional cloud Meet notes (beta)
+## Meet deployment mode
 
-Meet now offers a dedicated cloud browser worker so the user's laptop can be off.
-It joins as a named guest, keeps mic/camera off, streams admitted audio to AssemblyAI,
-leaves on explicit configured commands/end/stop, and generates encrypted notes with
-Nebius. Generated Google transcripts can be preferred with separate optional Meet
-OAuth permission, with captured speech as fallback. Guest admission and transcript
-access are not guaranteed. Cloud mode is disabled until its worker and keys are ready.
-See [cloud deployment and acceptance tests](docs/CLOUD_MEET.md).
+The frontend uses local Meet attendance. Keep `MEET_CLOUD_ENABLED=false` on the
+API and suspend any previously deployed Meet cloud workers. No separate Render
+Meet service or AssemblyAI key is needed for local attendance. The computer must
+remain awake with its companion running; local mode does not record, transcribe
+or summarize meetings. The dormant cloud implementation is retained for future
+operator testing; it is not offered by the current Meet page.
 
 ## Google Meet attendance integration
 

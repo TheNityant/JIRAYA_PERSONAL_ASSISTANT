@@ -1,4 +1,9 @@
-# Cloud Meet attendance and notes (opt-in beta)
+# Cloud Meet attendance and notes (dormant beta)
+
+The current frontend uses local attendance. This document is retained for future
+cloud deployments; no Meet cloud worker is required for the current setup. Keep
+`MEET_CLOUD_ENABLED=false` and suspend any cloud Meet worker while using local
+attendance. See [local setup](MEET_INTEGRATION.md).
 
 This is a dedicated background browser service, separate from the FastAPI HTTP
 service and the local companion. A guest named **Jiraya · AI meeting notes** joins

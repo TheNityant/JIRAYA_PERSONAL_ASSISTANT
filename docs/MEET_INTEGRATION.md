@@ -29,7 +29,11 @@ are not enabled by the Meet page.
 
 1. Deploy the updated backend on Render and frontend on Vercel. Keep the existing
    OAuth setup, stable database and encryption key. No new Google OAuth client or
-   dedicated GPU is required for this browser attendance path.
+   dedicated GPU is required for this browser attendance path. Set
+   `ENABLE_EXTERNAL_ACTIONS=true` and `MEET_CLOUD_ENABLED=false` on the API.
+   Suspend any previously deployed cloud Meet worker; local attendance needs no
+   additional Render service or AssemblyAI credentials. Enabling local attendance
+   pauses any saved cloud attendance preference before registering the device.
 2. Install `extensions/jiraya-workspace/jiraya-workspace-0.5.1.vsix` in desktop VS
    Code. Save work and stop an older helper from its original terminal; if it was
    started detached by an old extension, restarting the computer once clears it.

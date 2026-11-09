@@ -27,15 +27,17 @@ The sections below retain the original Phase 1 standalone CLI workflow for refer
 
 ## Meet deployment mode
 
-The frontend uses local Meet attendance. Keep `MEET_CLOUD_ENABLED=false` on the
-API and suspend any previously deployed Meet cloud workers. No separate Render
-Meet service or AssemblyAI key is needed for local attendance. The computer must
-remain awake with its companion running; local mode does not record, transcribe
-or summarize meetings. The dormant cloud implementation is retained for future
-operator testing; it is not offered by the current Meet page.
+Meet opens the cloud attendance and summaries controls. Enabling requires an
+online dedicated worker, configured providers, connected Calendar and explicit
+transcription consent; opening the page never enables attendance. The worker may
+run on AWS Lightsail or another Docker host independently of the Render API.
+Use **Use this computer instead** for local attendance without transcription.
+Keep the computer awake and its companion running in local mode. Switching from
+local to cloud pauses attendance on the currently paired computer; pause any
+other paired devices separately before enabling cloud attendance.
 
-For a separately hosted AWS worker pilot, see [AWS Lightsail deployment](docs/AWS_MEET.md).
-This does not change the current local attendance default or opt users into transcription.
+See [AWS Lightsail deployment](docs/AWS_MEET.md) and
+[cloud behavior and live acceptance checks](docs/CLOUD_MEET.md).
 
 ## Google Meet attendance integration
 

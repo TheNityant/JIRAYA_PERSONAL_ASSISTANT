@@ -51,7 +51,11 @@ export default function Page(){const [connected,setConnected]=useState(true);ret
       return respond({detail:'Unexpected route'},404);
     });
     await page.goto(url);
-    assert.equal(await page.getByRole('button',{name:'Cloud attendance and summaries',exact:true}).count(),0);
+    await page.getByRole('heading',{name:'Cloud Meet attendance · beta',exact:true}).waitFor();
+    assert.equal(registrations,0,'Opening cloud controls must not enable local attendance');
+    assert.equal(cloudPauses,0,'Opening controls must not change consent');
+    await page.getByRole('button',{name:'Use this computer instead',exact:true}).click();
+    assert.equal(await page.getByRole('button',{name:'Cloud attendance and summaries',exact:true}).count(),1);
     const pairing=page.getByRole('region',{name:'Meet device pairing'});
     await pairing.getByRole('button',{name:'Connect with VS Code',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:/Pair this computer in GitHub/}).count(),0);
@@ -66,7 +70,7 @@ export default function Page(){const [connected,setConnected]=useState(true);ret
     await consent.check();await enable.click();
     await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
     assert.equal(connects,1);assert.equal(registrations,1);assert.equal(gitRequests,0);assert.equal(cloudPauses,1);
-    await page.reload();await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
+    await page.reload();await page.getByRole('button',{name:'Use this computer instead',exact:true}).click();await page.getByRole('button',{name:'Pause attendance and leave',exact:true}).waitFor();
     assert.equal(connects,1,'Reload must reuse pairing and not register another device');
     device.recent=[{key:'retry-key',event_id:'meeting',status:'CLOSED',reason:'BROWSER_WINDOW_CLOSED',start:'2026-11-08T12:30:00Z'}];
     await page.getByRole('button',{name:'Refresh',exact:true}).click();

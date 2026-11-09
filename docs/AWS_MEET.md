@@ -108,10 +108,11 @@ Keep Render's normal `Dockerfile` and start command. Keep the frontend API URL a
 existing OAuth redirects unchanged. The AWS worker uses outbound APIs and the shared
 database; the frontend must never point its normal API base to the Lightsail IP.
 
-The current main frontend was deliberately switched to local-only navigation.
-**Launching the worker alone does not restore cloud controls or enable attendance.**
-Restore an explicit cloud setup entry after verifying worker readiness. Then the
-user must review transcription consent and enable cloud attendance from that UI.
+Meet now opens cloud setup with worker readiness, consent, sessions and notes.
+**Launching the worker alone does not enable attendance.** Once Render is live,
+open Meet, confirm **Cloud worker online**, review transcription consent and
+explicitly enable cloud attendance. Local mode remains available through
+**Use this computer instead**.
 Pause local attendance on every paired computer to avoid duplicate participants.
 No users are automatically opted in just by launching a worker.
 

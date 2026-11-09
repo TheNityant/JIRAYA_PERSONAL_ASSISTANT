@@ -31,8 +31,8 @@ are not enabled by the Meet page.
    OAuth setup, stable database and encryption key. No new Google OAuth client or
    dedicated GPU is required for this browser attendance path. Set
    `ENABLE_EXTERNAL_ACTIONS=true` and `MEET_CLOUD_ENABLED=false` on the API.
-   Suspend any previously deployed cloud Meet worker; local attendance needs no
-   additional Render service or AssemblyAI credentials. Enabling local attendance
+   Local attendance needs no additional Render service or AssemblyAI credentials.
+   On Meet choose **Use this computer instead** to open device pairing. Enabling local attendance
    pauses any saved cloud attendance preference before registering the device.
 2. Install `extensions/jiraya-workspace/jiraya-workspace-0.5.1.vsix` in desktop VS
    Code. Save work and stop an older helper from its original terminal; if it was

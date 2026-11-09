@@ -1,10 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import text
 
 from app.config import get_settings
 from app.db import engine
 
 router = APIRouter(tags=["health"])
+
+
+@router.head("/health", include_in_schema=False)
+def health_head() -> Response:
+    """Lightweight public liveness probe for uptime monitors using HEAD."""
+    return Response(status_code=200)
 
 
 @router.get("/health")

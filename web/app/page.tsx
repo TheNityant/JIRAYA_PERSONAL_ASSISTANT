@@ -12,7 +12,7 @@ const services = [
   {id: "gmail", name: "Gmail", detail: "Match incoming email against your instructions and prepare or send replies according to your approval settings."},
   {id: "google_calendar", name: "Google Calendar", detail: "Create events from meeting emails, check availability in configured scheduling workflows and monitor event changes."},
   {id: "github", name: "GitHub", detail: "Watch issue, pull request and workflow changes, and configure supported repository actions. Pair local tools for Git checkpoints."},
-  {id: "meet", name: "Google Meet attendance", detail: "Pair your computer to attend linked Calendar meetings with microphone and camera off. Keep the computer awake and its helper running. Host admission may be needed."},
+  {id: "meet", name: "Google Meet attendance", detail: "Enable cloud attendance and notes after reviewing transcription consent, or use a paired computer for local attendance. Host admission may be needed."},
 ];
 
 export default async function Home({searchParams}: {searchParams: Promise<Record<string, string | string[] | undefined>>}) {
@@ -55,7 +55,7 @@ export default async function Home({searchParams}: {searchParams: Promise<Record
       <section id="services" className="landing-section">
         <span className="eyebrow">Connect what you use</span><h2>Services with a specific job to do.</h2><p className="landing-section-intro">Choose your connections separately. Connecting one service does not authorize every other service.</p>
         <div className="landing-service-grid">{services.map(service => <article key={service.id}><span className={`landing-service-icon ${service.id}`}><ServiceIcon service={service.id} size={25}/></span><h3>{service.name}</h3><p>{service.detail}</p></article>)}</div>
-        <p className="landing-caption">Meet attendance runs locally on your paired computer. Keep the computer awake and its helper running; recording, transcription, summaries and voice participation are not enabled in local mode.</p>
+        <p className="landing-caption">Optional cloud Meet notes use AssemblyAI for live listening and Nebius for summaries. Cloud mode requires a running meeting server and explicit consent. Local attendance requires your computer to stay awake and does not transcribe meetings.</p>
       </section>
       <section id="how-it-works" className="landing-section">
         <span className="eyebrow">From setup to execution</span><h2>You set the rules and approval policy.</h2>

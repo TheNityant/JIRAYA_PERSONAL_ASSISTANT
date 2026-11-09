@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
@@ -76,6 +76,11 @@ app.include_router(automation_execution.router)
 app.include_router(connections.router)
 app.include_router(notifications.router)
 app.include_router(runtime.router)
+
+
+@app.head("/", include_in_schema=False)
+def root_head() -> Response:
+    return Response(status_code=200)
 
 
 @app.get("/")

@@ -23,10 +23,10 @@ async function main(){
    return route.fulfill({json:{...rows[0],summary:'{"overview":"We agreed to ship the fix."}',transcript:[{speaker:'unknown',text:'Ship the fix',at:'fixture'}]}});
   });
   await page.goto(url);await page.getByRole('heading',{name:'Cloud Meet attendance · beta',exact:true}).waitFor();
-  const enable=page.getByRole('button',{name:'Enable cloud attendance',exact:true});assert.equal(await enable.isEnabled(),false);
+  const enable=page.getByRole('button',{name:'Enable cloud attendance',exact:true});assert.equal(await enable.isEnabled(),false);assert.equal(writes.length,0,'Viewing cloud controls must not enable attendance');
   await page.getByText('Cloud attendance is not configured.',{exact:false}).waitFor();
   status.configured=true;await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByText('The cloud worker is offline.',{exact:false}).waitFor();
-  status.worker_online=true;await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();
+  status.worker_online=true;await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByText('Cloud worker online',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Connect Google Calendar',exact:true}).click();assert.equal(await enable.isEnabled(),false);
   await page.getByRole('checkbox',{name:/I have permission to add a transcription bot/}).check();await enable.click();
   await page.getByRole('button',{name:'Pause cloud attendance and leave',exact:true}).waitFor();assert.equal(writes.length,1);

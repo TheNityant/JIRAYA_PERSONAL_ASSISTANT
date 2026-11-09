@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+.venv
+venv
+__pycache__
+.pytest_cache
+web/node_modules
+web/.next
+credentials.json
+token.json
+meet_profile
+meet_profiles
+meet_evidence
+meet_voice_output

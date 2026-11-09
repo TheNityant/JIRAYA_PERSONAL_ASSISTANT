@@ -34,6 +34,9 @@ remain awake with its companion running; local mode does not record, transcribe
 or summarize meetings. The dormant cloud implementation is retained for future
 operator testing; it is not offered by the current Meet page.
 
+For a separately hosted AWS worker pilot, see [AWS Lightsail deployment](docs/AWS_MEET.md).
+This does not change the current local attendance default or opt users into transcription.
+
 ## Google Meet attendance integration
 
 The Phase 2e frontend now includes **Meet attendance**. An opted-in, paired local

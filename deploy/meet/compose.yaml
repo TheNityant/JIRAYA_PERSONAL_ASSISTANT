@@ -1,0 +1,24 @@
+# Run from the repository root: sudo docker compose -f deploy/meet/compose.yaml up -d --build
+# This file runs ONLY the Meet worker, not the API or a new database.
+services:
+  meet-worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.meet
+    image: jiraya-meet:local
+    env_file:
+      - path: ../../.env.meet
+        format: raw
+    restart: unless-stopped
+    stop_grace_period: 60s
+    shm_size: 512m
+    # Leave memory for the host on the initial 2 GB pilot instance.
+    # Raise this only after upgrading/measuring; do not increase concurrency yet.
+    mem_limit: 1536m
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    # No published ports, host networking, Docker socket, or Google login profiles.

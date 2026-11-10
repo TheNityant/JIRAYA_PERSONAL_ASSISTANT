@@ -644,3 +644,59 @@ def test_deleting_notes_does_not_reenqueue_the_same_meeting(cloud):
     with account_scope(user, user + "@example.test"), SessionLocal() as db:
         enqueue(db, user, "fixture@example.test", event)
         assert db.get(CloudMeetSession, key) is None
+
+
+def test_cloud_diagnostics_is_read_only_and_reports_own_calendar(cloud, monkeypatch):
+    from app.routes import meet_cloud
+
+    user, key, event = cloud
+    seen = []
+
+    def feed(db):
+        seen.append(get_settings().dev_user_id)
+        return {"status": "READY", "items": [event]}
+
+    monkeypatch.setattr(meet_cloud, "upcoming_meetings", feed)
+    with account_scope(user, user + "@example.test"), TestClient(app) as client:
+        response = client.get("/meet/cloud/diagnostics")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["identity_mode"] == "anonymous_guest"
+        assert data["eligible_events"] == data["events_in_join_window"] == 1
+        assert data["worker_online"] and data["worker_last_seen"]
+        assert all(check["ok"] for check in data["checks"])
+        assert seen == [user]
+        assert "fixture-api-key" not in response.text and "fixture-model-key" not in response.text
+    with SessionLocal() as db:
+        assert db.get(CloudMeetSession, key).status == "QUEUED"
+        assert db.get(CloudMeetSettings, user).enabled
+
+
+def test_cloud_diagnostics_handles_missing_calendar_without_probing_it(cloud, monkeypatch):
+    from app.routes import meet_cloud
+
+    monkeypatch.setattr(
+        meet_cloud, "upcoming_meetings", lambda db: pytest.fail("Another user's Calendar queried")
+    )
+    with account_scope("other-diagnostic-user", "other@example.test"), TestClient(app) as client:
+        data = client.get("/meet/cloud/diagnostics").json()
+        assert data["calendar_status"] == "CALENDAR_NOT_CONNECTED"
+        assert data["eligible_events"] == 0
+        assert not next(c["ok"] for c in data["checks"] if c["name"] == "Attendance enabled by you")
+
+
+def test_cloud_diagnostics_redacts_calendar_errors(cloud, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.routes import meet_cloud
+
+    def failure(db):
+        raise HTTPException(503, "secret provider failure")
+
+    monkeypatch.setattr(meet_cloud, "upcoming_meetings", failure)
+    user, _, _ = cloud
+    with account_scope(user, user + "@example.test"), TestClient(app) as client:
+        response = client.get("/meet/cloud/diagnostics")
+        assert response.status_code == 200
+        assert response.json()["calendar_status"] == "CALENDAR_ACCESS_FAILED"
+        assert "secret provider failure" not in response.text

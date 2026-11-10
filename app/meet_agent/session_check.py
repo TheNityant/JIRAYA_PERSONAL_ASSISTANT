@@ -33,6 +33,7 @@ def looks_like_meet_app(url: str) -> bool:
     if not url:
         return False
     from urllib.parse import urlsplit
+
     try:
         return urlsplit(url).scheme == "https" and urlsplit(url).hostname == "meet.google.com"
     except ValueError:
@@ -43,7 +44,13 @@ def looks_like_login_wall(url: str) -> bool:
     """True if ``url`` is a Google sign-in / consent page rather than Meet."""
     if not url:
         return False
-    return any(marker in url for marker in GOOGLE_SIGNIN_URL_MARKERS)
+    from urllib.parse import urlsplit
+
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme == "https" and parsed.hostname == "accounts.google.com"
+    except ValueError:
+        return False
 
 
 def looks_like_consent_screen(url: str) -> bool:

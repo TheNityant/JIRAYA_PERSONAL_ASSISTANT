@@ -31,7 +31,9 @@ def test_safety_blocks_external_actions_disabled():
 
 def test_safety_blocks_invalid_link():
     decision = evaluate_join_safety(
-        dry_run=False, external_actions_enabled=True, meet_url="https://meet.google.com/abc1-efg2-hi3"
+        dry_run=False,
+        external_actions_enabled=True,
+        meet_url="https://meet.google.com/abc1-efg2-hi3",
     )
     assert not decision.allowed
     assert decision.reason == "INVALID_MEET_LINK"
@@ -93,3 +95,11 @@ def test_verifier_auth_required_and_knocking():
 
 def test_joinresult_states_exported():
     assert JoinResult("JOINED", "ok").status == "JOINED"
+
+
+def test_current_google_signin_routes_are_login_walls_and_spoof_hosts_are_not():
+    assert looks_like_login_wall("https://accounts.google.com/v3/signin/identifier?continue=meet")
+    assert looks_like_login_wall("https://accounts.google.com/AccountChooser")
+    assert not looks_like_login_wall("https://accounts.google.com.evil.test/signin")
+    assert not looks_like_login_wall("https://example.test/?next=accounts.google.com/signin")
+    assert not looks_like_login_wall("http://accounts.google.com/signin")

@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, pack, pause
 from app.models import CloudMeetSession, CloudMeetSettings
+from app.routes.meet import upcoming_meetings
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
 from app.services.runtime_state_store import RuntimeStateStore
@@ -33,6 +34,7 @@ def availability(db, settings):
     except (KeyError, ValueError, TypeError):
         online = False
     return {
+        "worker_last_seen": heartbeat.get("at"),
         "configured": settings.meet_cloud_enabled
         and bool(settings.assemblyai_api_key)
         and bool(settings.token_encryption_key)
@@ -53,6 +55,65 @@ def status(db: Annotated[Session, Depends(get_db)]):
         "enabled": bool(preference and preference.enabled),
         "preferences": preference.preferences if preference else {},
         "google_transcript_authorized": bool(connection and MEET_READ_SCOPE in connection.scopes),
+    }
+
+
+@router.get("/diagnostics")
+def diagnostics(db: Annotated[Session, Depends(get_db)]):
+    """Explicit, account-scoped Calendar probe; never joins or enables attendance."""
+    settings = get_settings()
+    ready = availability(db, settings)
+    checks = [
+        {"name": "Cloud attendance enabled on API", "ok": settings.meet_cloud_enabled},
+        {"name": "External actions enabled on API", "ok": settings.enable_external_actions},
+        {"name": "AssemblyAI configured on API", "ok": bool(settings.assemblyai_api_key)},
+        {"name": "Encryption configured on API", "ok": bool(settings.token_encryption_key)},
+        {"name": "Summary provider configured on API", "ok": bool(settings.nebius_api_key)},
+        {"name": "Worker heartbeat within 90 seconds", "ok": ready["worker_online"]},
+    ]
+    connection = ConnectionStore(db).get_active(
+        user_id=settings.dev_user_id, provider="google_calendar"
+    )
+    feed = {"items": [], "status": "CALENDAR_NOT_CONNECTED"}
+    if connection:
+        try:
+            feed = upcoming_meetings(db)
+        except HTTPException:
+            feed = {"items": [], "status": "CALENDAR_ACCESS_FAILED"}
+    checks.append({"name": "Calendar connected and readable", "ok": feed["status"] == "READY"})
+    preference = db.get(CloudMeetSettings, settings.dev_user_id)
+    checks.append(
+        {"name": "Attendance enabled by you", "ok": bool(preference and preference.enabled)}
+    )
+    checks.append(
+        {
+            "name": "Attendance uses the current Calendar account",
+            "ok": bool(
+                connection
+                and preference
+                and preference.preferences.get("calendar_account") == connection.provider_account_id
+            ),
+        }
+    )
+    now = datetime.now(UTC)
+    items = feed.get("items", [])
+    window = [
+        event
+        for event in items
+        if -120 <= (datetime.fromisoformat(event["start"]) - now).total_seconds() <= 30
+    ]
+    return {
+        **ready,
+        "identity_mode": "anonymous_guest",
+        "display_name": "Jiraya · AI meeting notes",
+        "checks": checks,
+        "calendar_status": feed["status"],
+        "eligible_events": len(items),
+        "events_in_join_window": len(window),
+        "next_start": min(items, key=lambda event: datetime.fromisoformat(event["start"]))["start"]
+        if items
+        else None,
+        "message": "Cloud attendance uses an anonymous guest, not your Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
     }
 
 

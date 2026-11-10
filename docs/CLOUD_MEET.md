@@ -127,3 +127,12 @@ cloud attendance as production-ready before the acceptance test passes.
 7. Sign into another Jiraya account: it must not see or alter the first account's
    sessions. Delete notes; verify removal. Observe live CPU, memory and provider
    usage before raising concurrency or offering this to other users.
+
+
+## Diagnosing a missed join and Google identity
+
+Use **Meet → Run Meet checks** before testing a fresh event. The read-only check reports API configuration, external actions, the worker heartbeat, Calendar access and event counts. No provider keys are returned and no meeting is joined. Automatic attempts are made from 30 seconds before start through two minutes after start. Enabling attendance after that window does not replay the meeting. Check the session reason for admission failures and sign-in requirements. An online heartbeat proves database contact, not browser admission or audio capture.
+
+Cloud attendance deliberately uses an anonymous guest with a fresh browser profile. Connecting Calendar does not sign Chromium into Google. A guest display name cannot confer the user's Google identity or access to sign-in-only meetings. To attend as your actual Google account with the currently supported implementation, select **Use this computer instead**, pair the companion and manually sign into its separate Google browser profile with the intended Calendar account. Google supplies that signed-in profile's participant name. Do not give Jiraya your Google password or upload browser cookies. A per-user, remotely authenticated cloud browser is not implemented by this deployment.
+
+Newer Google `/v3/signin` and AccountChooser routes are now recognised as sign-in walls, so they no longer appear as an unrelated unexpected host. This detection fix also requires updating/rebuilding the AWS worker.

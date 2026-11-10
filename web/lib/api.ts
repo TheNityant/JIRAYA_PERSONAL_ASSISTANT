@@ -194,6 +194,7 @@ export type Account = {id: string; email: string; display_name: string};
 export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
 
 export const api = {
+  cloudMeetDiagnostics: () => request<{worker_online:boolean;worker_last_seen:string|null;identity_mode:string;display_name:string;checks:Array<{name:string;ok:boolean}>;calendar_status:string;eligible_events:number;events_in_join_window:number;next_start:string|null;message:string}>("/meet/cloud/diagnostics"),
   cloudMeetStatus: () => request<any>("/meet/cloud/status"),
   cloudMeetSessions: () => request<{items:any[]}>("/meet/cloud/sessions"),
   cloudMeetDetail: (id:string) => request<any>(`/meet/cloud/sessions/${encodeURIComponent(id)}`),

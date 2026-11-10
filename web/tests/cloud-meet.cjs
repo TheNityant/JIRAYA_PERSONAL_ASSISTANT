@@ -15,6 +15,7 @@ async function main(){
   await page.route('**/api/jiraya/meet/cloud/**',async route=>{
    const req=route.request(),relative=new URL(req.url()).pathname.split('/meet/cloud/')[1];
    if(relative==='status')return route.fulfill({json:status});
+   if(relative==='diagnostics')return route.fulfill({json:{worker_online:true,worker_last_seen:new Date().toISOString(),identity_mode:'anonymous_guest',display_name:'Jiraya · AI meeting notes',checks:[{name:'Calendar connected and readable',ok:true}],calendar_status:'READY',eligible_events:1,events_in_join_window:0,next_start:new Date().toISOString(),message:'Cloud attendance uses an anonymous guest, not your Google account.'}});
    if(relative==='settings'){const body=req.postDataJSON();writes.push(body);assert(body.enabled===false||body.consent===true);status={...status,enabled:body.enabled,preferences:body};return route.fulfill({json:status});}
    if(relative==='sessions')return route.fulfill({json:{items:rows}});
    if(req.method()==='DELETE'){rows=[];return route.fulfill({json:{deleted:true}});}
@@ -23,6 +24,9 @@ async function main(){
    return route.fulfill({json:{...rows[0],summary:'{"overview":"We agreed to ship the fix."}',transcript:[{speaker:'unknown',text:'Ship the fix',at:'fixture'}]}});
   });
   await page.goto(url);await page.getByRole('heading',{name:'Cloud Meet attendance · beta',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Run Meet checks',exact:true}).click();
+  await page.getByText('Ready: Calendar connected and readable',{exact:true}).waitFor();
+  assert.equal(writes.length,0,'Diagnostics must not enable or join a meeting');
   const enable=page.getByRole('button',{name:'Enable cloud attendance',exact:true});assert.equal(await enable.isEnabled(),false);assert.equal(writes.length,0,'Viewing cloud controls must not enable attendance');
   await page.getByText('Cloud attendance is not configured.',{exact:false}).waitFor();
   status.configured=true;await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByText('The cloud worker is offline.',{exact:false}).waitFor();

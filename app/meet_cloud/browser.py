@@ -217,6 +217,21 @@ class CloudJoiner(MeetJoiner):
         from playwright.async_api import async_playwright
 
         engine = await async_playwright().start()
+        if (
+            getattr(self.settings, "meet_cloud_browser_driver", "playwright") == "native"
+            and getattr(self.settings, "meet_cloud_identity_mode", "guest") == "guest"
+        ):
+            from app.meet_cloud.native_browser import launch
+
+            handle, context = await launch(engine, self.profile_dir, self.audio.name)
+            try:
+                await context.grant_permissions(
+                    ["microphone", "camera"], origin="https://meet.google.com"
+                )
+                return handle, context
+            except BaseException:
+                await handle.stop()
+                raise
         # Do not pass application/provider credentials into the Chromium environment.
         env = {
             key: value

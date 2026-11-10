@@ -25,3 +25,9 @@ sudo docker compose -f deploy/meet/compose.yaml up -d --build meet-worker
 ```
 
 No new frontend AWS URL or Google browser login is needed. Keep the existing database, encryption key and provider keys. Old browser profile files are not automatically deleted, but guest mode does not read them. Test a fresh Calendar meeting with guests allowed; admit the name shown in Jiraya, confirm devices off, verify speech capture and an explicit leave command, then inspect notes. Rejections remain explicit diagnostics, not a guarantee that every Google meeting accepts the bot.
+
+## Native headed browser comparison
+
+After the manual AWS browser reached guest pre-join and admission, the guest worker defaults to `MEET_CLOUD_BROWSER_DRIVER=native`. It launches ordinary headed Chromium under Xvfb with a fresh temporary profile, then attaches a loopback-only CDP connection to operate it. This removes the Playwright launch defaults and fake-device flags; it does not mask browser identity, automate Google sign-in, or bypass Google checks. Device OFF verification still gates joining and inbound meeting audio is routed to the private PulseAudio sink. The new CDP connection remains a difference from the successful manual test, so live admission must be retested. There is no CDP/VNC port published on the host.
+
+Stop the manual diagnostic first (Ctrl+C or close its Chromium window), then pull main and rebuild/restart the worker. `MEET_CLOUD_BROWSER_DRIVER=playwright` retains the previous launch implementation for controlled comparisons. No frontend changes are required for this switch.

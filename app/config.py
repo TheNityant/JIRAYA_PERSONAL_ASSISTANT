@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     nebius_timeout_seconds: float = 60.0
 
     # Cloud Meet is opt-in and runs in a separate browser/audio worker container.
+    meet_cloud_browser_driver: Literal["native", "playwright"] = "native"
     meet_cloud_guest_only: bool = True
     meet_cloud_enabled: bool = False
     meet_cloud_identity_mode: Literal["guest", "google_profile"] = "guest"

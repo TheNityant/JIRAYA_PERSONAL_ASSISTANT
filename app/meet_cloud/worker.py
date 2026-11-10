@@ -410,10 +410,12 @@ async def attend(key, worker_id, shutdown):
 
 async def preflight():
     if (
-        not get_base_settings().meet_cloud_guest_only
-        and get_base_settings().meet_cloud_browser_portal_enabled
-        and not shutil.which("Xvfb")
-    ):
+        get_base_settings().meet_cloud_browser_driver == "native"
+        or (
+            not get_base_settings().meet_cloud_guest_only
+            and get_base_settings().meet_cloud_browser_portal_enabled
+        )
+    ) and not shutil.which("Xvfb"):
         raise RuntimeError("Use the updated Dockerfile.meet: frontend browser setup requires Xvfb.")
     if not all(shutil.which(command) for command in ("pactl", "ffmpeg")):
         raise RuntimeError("Use Dockerfile.meet: the cloud worker requires PulseAudio and FFmpeg.")

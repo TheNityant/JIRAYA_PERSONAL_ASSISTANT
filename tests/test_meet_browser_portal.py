@@ -48,6 +48,7 @@ def portal(monkeypatch):
         "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
     }.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MEET_CLOUD_BROWSER_DRIVER", "playwright")
     monkeypatch.setenv("MEET_CLOUD_GUEST_ONLY", "false")
     get_base_settings.cache_clear()
     init_db()

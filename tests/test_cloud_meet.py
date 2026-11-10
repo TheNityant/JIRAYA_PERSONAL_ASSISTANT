@@ -33,6 +33,7 @@ def cloud(monkeypatch):
     monkeypatch.setenv("ASSEMBLYAI_API_KEY", "fixture-api-key")
     monkeypatch.setenv("NEBIUS_API_KEY", "fixture-model-key")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("MEET_CLOUD_BROWSER_DRIVER", "playwright")
     monkeypatch.setenv("MEET_CLOUD_GUEST_ONLY", "false")
     get_base_settings.cache_clear()
     init_db()

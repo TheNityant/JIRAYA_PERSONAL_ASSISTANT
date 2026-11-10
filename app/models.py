@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, JSON, String, Text, UniqueConstraint
@@ -266,3 +266,32 @@ class CloudMeetSession(Owned, Base):
     summary_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CloudMeetBrowserSetup(Owned, Base):
+    """Short-lived remote sign-in. Screen/input contents are encrypted, then erased."""
+
+    __tablename__ = "cloud_meet_browser_setups"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: uuid.uuid4().hex)
+    calendar_account: Mapped[str] = mapped_column(String(320))
+    auth_session_hash: Mapped[str] = mapped_column(String(64))
+    # At most one remote desktop on the initial single-worker AWS deployment.
+    active_slot: Mapped[int | None] = mapped_column(nullable=True, unique=True)
+    status: Mapped[str] = mapped_column(String(40), default="QUEUED", index=True)
+    reason: Mapped[str] = mapped_column(String(80), default="")
+    worker_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    frame_ciphertext: Mapped[str] = mapped_column(Text, default="")
+    next_sequence: Mapped[int] = mapped_column(default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class CloudMeetBrowserInput(Base):
+    __tablename__ = "cloud_meet_browser_inputs"
+    __table_args__ = (UniqueConstraint("setup_id", "sequence", name="uq_browser_input_sequence"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    setup_id: Mapped[str] = mapped_column(String(64), index=True)
+    sequence: Mapped[int] = mapped_column()
+    payload_ciphertext: Mapped[str] = mapped_column(Text)

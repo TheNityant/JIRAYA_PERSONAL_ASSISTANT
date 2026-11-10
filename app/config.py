@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     meet_cloud_enabled: bool = False
     meet_cloud_identity_mode: Literal["guest", "google_profile"] = "guest"
     meet_cloud_profile_root: str = "/home/jiraya/google_profiles"
+    meet_cloud_browser_portal_enabled: bool = False
     meet_cloud_max_minutes: int = Field(default=120, ge=5, le=240)
     meet_cloud_retention_days: int = Field(default=7, ge=1, le=30)
     assemblyai_api_key: str = Field(default="", repr=False)

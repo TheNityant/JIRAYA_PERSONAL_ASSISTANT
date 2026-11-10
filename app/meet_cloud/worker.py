@@ -33,14 +33,18 @@ from app.services.runtime_state_store import RuntimeStateStore
 logger = logging.getLogger(__name__)
 
 
-def heartbeat(worker_id, identity_mode="guest"):
+def heartbeat(worker_id, identity_mode="guest", browser_portal=False):
     with SessionLocal() as db:
+        from app.meet_cloud.portal_store import expire
+
+        expire(db)
         RuntimeStateStore(db).set(
             "cloud-meet-worker",
             {
                 "at": datetime.now(UTC).isoformat(),
                 "worker": worker_id,
                 "identity_mode": identity_mode,
+                "browser_portal": browser_portal,
             },
         )
 
@@ -360,6 +364,9 @@ async def attend(key, worker_id, shutdown):
                     row.summary_state = "QUEUED" if admitted or turns else "DONE"
                     row.details = {
                         "reason": reason,
+                        "browser_result": {"status": result.status, "reason": result.reason}
+                        if result
+                        else None,
                         "admitted": admitted,
                         "coverage": "captured while bot was admitted"
                         if verified
@@ -396,6 +403,8 @@ async def attend(key, worker_id, shutdown):
 
 
 async def preflight():
+    if get_base_settings().meet_cloud_browser_portal_enabled and not shutil.which("Xvfb"):
+        raise RuntimeError("Use the updated Dockerfile.meet: frontend browser setup requires Xvfb.")
     if not all(shutil.which(command) for command in ("pactl", "ffmpeg")):
         raise RuntimeError("Use Dockerfile.meet: the cloud worker requires PulseAudio and FFmpeg.")
     process = await asyncio.create_subprocess_exec(
@@ -433,7 +442,12 @@ async def serve(settings, shutdown=None):
     async def health():
         while not shutdown.is_set():
             try:
-                await asyncio.to_thread(heartbeat, worker_id, settings.meet_cloud_identity_mode)
+                await asyncio.to_thread(
+                    heartbeat,
+                    worker_id,
+                    settings.meet_cloud_identity_mode,
+                    settings.meet_cloud_browser_portal_enabled,
+                )
             except Exception:  # noqa: BLE001 - lost control database must stop attendance
                 logger.warning("Cloud worker lost database control access; stopping")
                 shutdown.set()
@@ -450,6 +464,17 @@ async def serve(settings, shutdown=None):
                     key = claim(db, worker_id)
                 if key:
                     await attend(key, worker_id, shutdown)
+                elif (
+                    settings.meet_cloud_browser_portal_enabled
+                    and settings.meet_cloud_identity_mode == "google_profile"
+                ):
+                    from app.meet_cloud.portal import run_setup
+                    from app.meet_cloud.portal_store import claim_setup
+
+                    with SessionLocal() as db:
+                        setup_key = claim_setup(db, worker_id)
+                    if setup_key:
+                        await run_setup(setup_key, worker_id, settings, shutdown)
                 if summary_task is None or summary_task.done():
                     if summary_task is not None:
                         try:

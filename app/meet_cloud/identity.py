@@ -32,7 +32,7 @@ def browser_status(db, user_id, account):
     }
 
 
-def set_browser_status(db, user_id, account, state):
+def set_browser_status(db, user_id, account, state, *, notify=True):
     if not account or state not in STATES:
         raise ValueError("A Calendar identity and valid browser state are required.")
     previous = browser_status(db, user_id, account)
@@ -56,6 +56,8 @@ def set_browser_status(db, user_id, account, state):
             ):
                 alert.read_at = datetime.now(UTC)
         db.commit()
+        return
+    if not notify:
         return
     # Stable until the next successful verification: repeated discovery cycles
     # or meeting failures produce one in-app alert, rather than one per poll.

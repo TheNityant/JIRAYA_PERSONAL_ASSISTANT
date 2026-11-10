@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.meet_cloud.identity import browser_status, identity_mode
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, pack, pause
-from app.models import CloudMeetSession, CloudMeetSettings
+from app.models import CloudMeetBrowserSetup, CloudMeetSession, CloudMeetSettings
 from app.routes.meet import upcoming_meetings
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
@@ -36,6 +36,7 @@ def availability(db, settings):
         online = False
     return {
         "worker_last_seen": heartbeat.get("at"),
+        "browser_portal_available": bool(online and heartbeat.get("browser_portal")),
         "configured": settings.meet_cloud_enabled
         and bool(settings.assemblyai_api_key)
         and bool(settings.token_encryption_key)
@@ -129,7 +130,7 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
         "next_start": min(items, key=lambda event: datetime.fromisoformat(event["start"]))["start"]
         if items
         else None,
-        "message": "The saved Google browser session is reused across meetings and restarts. Initial setup is operator-assisted; reconnect if Google invalidates it. Calendar OAuth and worker heartbeat do not establish browser sign-in. Every join checks the account again; no guest fallback is used."
+        "message": "The saved Google browser session is reused across meetings and restarts. Use the frontend Google meeting browser connection for setup or reconnection if Google invalidates the saved session. Calendar OAuth and worker heartbeat do not establish browser sign-in. Every join checks the account again; no guest fallback is used."
         if mode == "google_profile"
         else "Cloud attendance uses an anonymous guest, not your Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
     }
@@ -161,6 +162,19 @@ def configure(body: Preferences, db: Annotated[Session, Depends(get_db)]):
     )
     if not connection:
         raise HTTPException(409, "Connect Google Calendar first.")
+    from app.meet_cloud.portal_store import ACTIVE_SETUP
+
+    if db.scalar(
+        select(CloudMeetBrowserSetup.id)
+        .where(
+            CloudMeetBrowserSetup.user_id == settings.dev_user_id,
+            CloudMeetBrowserSetup.status.in_(ACTIVE_SETUP),
+        )
+        .limit(1)
+    ):
+        raise HTTPException(
+            409, "Finish or close your meeting browser setup before enabling attendance."
+        )
     if (
         identity_mode(db, settings) == "google_profile"
         and browser_status(db, settings.dev_user_id, connection.provider_account_id)["state"]
@@ -168,7 +182,7 @@ def configure(body: Preferences, db: Annotated[Session, Depends(get_db)]):
     ):
         raise HTTPException(
             409,
-            "Connect your Google meeting browser first. Calendar OAuth is separate. Complete initial AWS browser setup, then enable attendance; future meetings reuse the saved session.",
+            "Connect your Google meeting browser first. Calendar OAuth is separate. Complete the frontend meeting browser connection, then enable attendance; future meetings reuse the saved session.",
         )
     TokenCipher(settings.token_encryption_key)
     row = db.get(CloudMeetSettings, settings.dev_user_id) or CloudMeetSettings(

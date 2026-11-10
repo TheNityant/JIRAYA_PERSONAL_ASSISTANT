@@ -48,6 +48,7 @@ def _tenant_queries(state):
             Action,
             Automation,
             AutomationExecution,
+            CloudMeetBrowserSetup,
             CloudMeetSession,
             CloudMeetSettings,
             Connection,
@@ -60,6 +61,7 @@ def _tenant_queries(state):
         for model in (
             CloudMeetSettings,
             CloudMeetSession,
+            CloudMeetBrowserSetup,
             Event,
             Action,
             Obligation,

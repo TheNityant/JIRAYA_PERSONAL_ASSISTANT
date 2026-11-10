@@ -1,4 +1,6 @@
-# Operator-assisted Google-account attendance on AWS (pilot)
+# Operator-assisted Google-account attendance on AWS (fallback)
+
+The frontend setup is documented in [MEET_BROWSER_PORTAL.md](MEET_BROWSER_PORTAL.md). Use this SSH method only as the operator fallback.
 
 This adds a manual Google browser sign-in to the existing worker. It does not convert OAuth tokens into cookies or bypass Google's browser/login checks. Real Google login, two-factor authentication and a live meeting must still be tested by the operator. This is an operator-assisted pilot, not a self-service multi-user login portal. A successful login does not guarantee admission to every meeting.
 
@@ -76,7 +78,7 @@ The API distinguishes browser `SETUP_REQUIRED`, `CONNECTED` (last verified) and 
 
 `CONNECTED` does not prove meeting admission. Host rejection, a network outage, a worker failure and a missing Google browser session are separate conditions. Every join verifies the browser's Google account again and never falls back to an anonymous name. A bounded account-chip wait avoids treating normal page hydration as an expired login.
 
-There is no self-service frontend desktop connection portal yet. The frontend shows setup/reconnect status and blocks an unconfigured enable action; manual setup still uses the trusted operator and SSH tunnel. Do not advertise this pilot as finished public onboarding.
+The frontend portal now provides setup and reconnect controls when the worker enables `MEET_CLOUD_BROWSER_PORTAL_ENABLED=true`; see [MEET_BROWSER_PORTAL.md](MEET_BROWSER_PORTAL.md). This document retains the operator-assisted SSH fallback.
 
 ## Why OAuth/watch is separate
 

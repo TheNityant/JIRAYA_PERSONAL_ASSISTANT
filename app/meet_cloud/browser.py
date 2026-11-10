@@ -341,6 +341,12 @@ class CloudJoiner(MeetJoiner):
                     (sf.PREJOIN_CAMERA_OFF_SELECTORS, "camera_off"),
                 ):
                     if not await super()._toggle_media_off(page, selectors, label, evidence):
+                        # A spoken leave/stop may arrive while the async media
+                        # probe is running. The base probe stops on cancellation;
+                        # leave immediately instead of reporting a media failure.
+                        if self._cancelled():
+                            self.leave_reason = self.leave_reason or "STOP_OR_TIME_LIMIT"
+                            return
                         raise RuntimeError("Microphone/camera off state could not be confirmed.")
                 await asyncio.sleep(1)
         finally:

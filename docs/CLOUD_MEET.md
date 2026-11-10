@@ -159,3 +159,5 @@ Earlier failed sessions cannot gain a screenshot retroactively. After updating t
 ## Google-account attendance pilot
 
 Optional persistent Google browser profiles and operator-assisted SSH-tunnelled sign-in are now available. See [AWS Google sign-in setup](AWS_GOOGLE_SIGNIN.md). Set `MEET_CLOUD_IDENTITY_MODE=google_profile` only after configuring that workflow. This replaces guest identity for that mode; it does not exchange API tokens for browser cookies, and requires live Google sign-in and admission testing. Earlier descriptions of anonymous-only behavior apply to `guest` mode.
+
+For self-service Google browser setup in the frontend, see [MEET_BROWSER_PORTAL.md](MEET_BROWSER_PORTAL.md). It verifies that the saved session survives a fresh attendance browser before allowing enable.

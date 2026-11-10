@@ -57,10 +57,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-from app.routes import meet, meet_cloud
+from app.routes import meet, meet_browser, meet_cloud
 
 app.include_router(meet.router)
 app.include_router(meet_cloud.router)
+app.include_router(meet_browser.router)
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(ai.router)

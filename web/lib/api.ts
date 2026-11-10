@@ -193,7 +193,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export type Account = {id: string; email: string; display_name: string};
 export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
 
+export type MeetBrowserSetup = {id:string;status:string;reason:string;expires_at:string;next_sequence:number;calendar_account:string;frame?:{image:string;width:number;height:number;origin:string;captured_at:string}};
+export type MeetBrowserInput = {kind:"click"|"text"|"key"|"scroll";x?:number;y?:number;text?:string;key?:string;delta?:number};
+
 export const api = {
+  startMeetBrowser: () => request<MeetBrowserSetup>("/meet/cloud/browser/sessions", {method:"POST",body:JSON.stringify({consent:true})}),
+  meetBrowser: (id:string) => request<MeetBrowserSetup>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}`),
+  meetBrowserInput: (id:string, sequence:number, events:MeetBrowserInput[]) => request<{accepted:boolean;next_sequence:number}>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}/input`,{method:"POST",body:JSON.stringify({sequence,events})}),
+  cancelMeetBrowser: (id:string) => request<MeetBrowserSetup>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}/cancel`,{method:"POST",keepalive:true}),
   cloudMeetDiagnostics: () => request<{worker_online:boolean;worker_last_seen:string|null;identity_mode:string;display_name:string;checks:Array<{name:string;ok:boolean}>;calendar_status:string;eligible_events:number;events_in_join_window:number;next_start:string|null;message:string}>("/meet/cloud/diagnostics"),
   cloudMeetStatus: () => request<any>("/meet/cloud/status"),
   cloudMeetSessions: () => request<{items:any[]}>("/meet/cloud/sessions"),

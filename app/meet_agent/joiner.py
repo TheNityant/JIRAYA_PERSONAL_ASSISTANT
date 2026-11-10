@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.meet_agent import selector_fallbacks as sf
@@ -29,7 +29,7 @@ from app.meet_agent import session_check as sc
 @dataclass
 class JoinEvidence:
     meet_url: str
-    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     url_trace: list[str] = field(default_factory=list)
     screenshots: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -38,7 +38,7 @@ class JoinEvidence:
         try:
             path = Path(directory)
             path.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
             target = path / f"{stamp}_{label}.png"
             await page.screenshot(path=str(target))
             self.screenshots.append(str(target))
@@ -86,7 +86,7 @@ class MeetJoiner:
         self.leave_call = leave_call
 
     def _cancelled(self):
-        return (self.stop_event is not None and self.stop_event.is_set()) or (self.leave_at is not None and datetime.now(timezone.utc) >= self.leave_at)
+        return (self.stop_event is not None and self.stop_event.is_set()) or (self.leave_at is not None and datetime.now(UTC) >= self.leave_at)
 
     async def _launch_context(self):
         try:
@@ -149,25 +149,27 @@ class MeetJoiner:
             await asyncio.sleep(min(1, max(0, deadline - asyncio.get_running_loop().time())))
 
     async def _toggle_media_off(self, page, selectors, label: str, evidence) -> bool:
-        """Require visible OFF-state evidence, including after controls re-render."""
-        media = "microphone" if label == "mic_muted" else "camera"
-        off = (f'[aria-label*="{media}" i][aria-label*="turn on" i]',)
-        if await self._check_any_visible(page, off):
-            evidence.notes.append(f"{label}_already_off")
-            return True
-        for selector in selectors:
-            try:
-                locator = page.locator(selector).first
-                if not await locator.is_visible():
-                    continue
-                await locator.click(timeout=3000)
-                await page.wait_for_timeout(800)
-                # The original selector may no longer match after the label changes.
-                if await self._check_any_visible(page, off):
-                    evidence.notes.append(f"{label}_confirmed_off")
-                    return True
-            except Exception:
-                continue
+        """Bounded retries for delayed/re-rendered media controls; never bypass OFF proof."""
+        off = sf.MIC_OFF_SELECTORS if label == "mic_muted" else sf.CAMERA_OFF_SELECTORS
+        # Filter before .first: a hidden duplicate must not hide a visible control.
+        off = (", ".join(selector + ":visible" for selector in off),)
+        on = (", ".join(selector + ":visible" for selector in selectors),)
+        clicked = False
+        for attempt in range(20):
+            if self._cancelled() or page.is_closed():
+                break
+            on_visible = await self._check_any_visible(page, on)
+            if not on_visible and await self._check_any_visible(page, off):
+                evidence.notes.append(f"{label}_{'confirmed_off' if clicked else 'already_off'}")
+                return True
+            if on_visible and not clicked:
+                try:
+                    await page.locator(on[0]).first.click(timeout=1000)
+                    clicked = True
+                except Exception:  # noqa: BLE001 - controls may detach while Meet renders
+                    evidence.notes.append(f"{label}_control_changed")
+            if attempt < 19:
+                await page.wait_for_timeout(250)
         evidence.notes.append(f"{label}_not_confirmed_off")
         return False
 
@@ -207,7 +209,7 @@ class MeetJoiner:
         if status == "JOINED" and self.on_joined:
             self.on_joined()
         if self.leave_at is not None:
-            self.stay_seconds = min(self.stay_seconds, max(0, (self.leave_at - datetime.now(timezone.utc)).total_seconds()))
+            self.stay_seconds = min(self.stay_seconds, max(0, (self.leave_at - datetime.now(UTC)).total_seconds()))
         if status == "JOINED" and self.stay_seconds > 0:
             evidence.notes.append(f"staying_in_call_{int(self.stay_seconds)}s")
             await self._wait_in_call(context, evidence, int(self.stay_seconds * 1000))
@@ -300,7 +302,7 @@ class MeetJoiner:
                     '[aria-label*="microphone" i]', timeout=8000
                 )
             except Exception:
-                pass  # tray never rendered; toggles are best effort anyway
+                pass  # OFF-state verification below still gates joining.
             mic_off = await self._toggle_media_off(page, sf.PREJOIN_MIC_MUTE_SELECTORS, "mic_muted", evidence)
             camera_off = await self._toggle_media_off(page, sf.PREJOIN_CAMERA_OFF_SELECTORS, "camera_off", evidence)
             if not mic_off or not camera_off:

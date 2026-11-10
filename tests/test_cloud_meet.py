@@ -700,3 +700,115 @@ def test_cloud_diagnostics_redacts_calendar_errors(cloud, monkeypatch):
         assert response.status_code == 200
         assert response.json()["calendar_status"] == "CALENDAR_ACCESS_FAILED"
         assert "secret provider failure" not in response.text
+
+
+def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(cloud, monkeypatch):
+    from app.meet_agent.joiner import JoinEvidence, JoinResult
+    from app.meet_cloud import worker
+
+    user, key, event = cloud
+
+    async def nop(*args):
+        pass
+
+    monkeypatch.setattr(
+        worker, "AudioSink", lambda name: SimpleNamespace(name=name, setup=nop, close=nop)
+    )
+    monkeypatch.setattr(
+        worker,
+        "upcoming_meetings",
+        lambda db: {
+            "status": "READY",
+            "calendar_account": "fixture@example.test",
+            "items": [event],
+        },
+    )
+
+    class Browser:
+        leave_reason = ""
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def join(self, url):
+            return JoinResult(
+                "FAILED",
+                "MEDIA_NOT_CONFIRMED_OFF",
+                JoinEvidence(
+                    url,
+                    notes=[
+                        "mic_muted_confirmed_off",
+                        "camera_off_not_confirmed_off",
+                        "unrelated private information",
+                    ],
+                ),
+            )
+
+    monkeypatch.setattr(worker, "CloudJoiner", Browser)
+    with account_scope(user, user + "@example.test"), SessionLocal() as db:
+        assert claim(db, "fixture-worker") == key
+    asyncio.run(worker.attend(key, "fixture-worker", asyncio.Event()))
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        assert row.status == "FAILED" and row.summary_state == "DONE"
+        assert not row.transcript_ciphertext
+        assert row.details["summary_status"] == "NO_ATTENDANCE"
+        assert not row.details["summary_requested"]
+        assert row.details["media_checks"] == [
+            "mic_muted_confirmed_off",
+            "camera_off_not_confirmed_off",
+        ]
+        assert "unrelated private information" not in json.dumps(row.details)
+
+
+def test_legacy_failed_join_does_not_keep_waiting_for_google(cloud, monkeypatch):
+    from app.meet_cloud import worker
+
+    _user, key, _ = cloud
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        row.status = "FAILED"
+        row.details = {"summary_status": "WAITING_FOR_GOOGLE", "summary_requested": True}
+        db.commit()
+    monkeypatch.setattr(
+        worker,
+        "google_transcript",
+        lambda *args: pytest.fail("Failed automatic join queried Google"),
+    )
+    monkeypatch.setattr(
+        worker,
+        "NebiusProvider",
+        lambda *args: pytest.fail("Failed automatic join charged inference"),
+    )
+    worker.make_summary(key)
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        assert row.summary_state == "DONE" and row.details["summary_status"] == "NO_ATTENDANCE"
+
+
+def test_explicit_summary_refresh_can_fetch_accessible_google_notes_after_failed_join(
+    cloud, monkeypatch
+):
+    from app.meet_cloud import worker
+
+    user, key, _ = cloud
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        row.status = "FAILED"
+        row.ends_at = datetime.now(UTC) - timedelta(minutes=1)
+        db.commit()
+    with account_scope(user, user + "@example.test"), TestClient(app) as client:
+        assert client.post("/meet/cloud/sessions/" + key + "/summary").status_code == 200
+    monkeypatch.setattr(
+        worker, "google_transcript", lambda *args: [{"text": "Accessible Google notes"}]
+    )
+    monkeypatch.setattr(worker, "NebiusProvider", lambda *args: object())
+    monkeypatch.setattr(worker, "summarize", lambda *args: "Google summary")
+    worker.make_summary(key)
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        assert row.details["explicit_summary_refresh"]
+        assert (
+            row.details["summary_status"] == "READY"
+            and row.details["summary_source"] == "google_meet"
+        )

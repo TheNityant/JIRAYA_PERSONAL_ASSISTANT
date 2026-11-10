@@ -136,3 +136,12 @@ Use **Meet → Run Meet checks** before testing a fresh event. The read-only che
 Cloud attendance deliberately uses an anonymous guest with a fresh browser profile. Connecting Calendar does not sign Chromium into Google. A guest display name cannot confer the user's Google identity or access to sign-in-only meetings. To attend as your actual Google account with the currently supported implementation, select **Use this computer instead**, pair the companion and manually sign into its separate Google browser profile with the intended Calendar account. Google supplies that signed-in profile's participant name. Do not give Jiraya your Google password or upload browser cookies. A per-user, remotely authenticated cloud browser is not implemented by this deployment.
 
 Newer Google `/v3/signin` and AccountChooser routes are now recognised as sign-in walls, so they no longer appear as an unrelated unexpected host. This detection fix also requires updating/rebuilding the AWS worker.
+
+
+## Media verification failures
+
+`MEDIA_NOT_CONFIRMED_OFF` means the browser stopped before joining because it could not prove both devices were off. This is separate from OAuth verification and host admission. The media check recognises explicit action labels in either word order (for example, “Turn on microphone” or “Turn microphone on”), supports control tooltip labels, filters hidden duplicate controls before selecting the first match, and retries briefly for delayed rendering/state changes. It never treats a missing device, arbitrary page text or a generic settings button as proof that media is off, and does not repeatedly click a toggle while waiting for confirmation.
+
+New failed sessions store bounded media-check outcomes, identifying which device was confirmed off. They show `NO_ATTENDANCE`, and do not automatically poll Google or charge a summary model. Legacy failed sessions still in the summary queue are corrected when processed by the updated worker. An explicit transcript refresh after the scheduled meeting end can still request a Google transcript available to the connected account.
+
+After deploying/rebuilding the AWS worker, test with a new event 5–10 minutes ahead. Old failed attendance attempts are not automatically replayed. If the failure remains, share the displayed media-check outcomes; an actual Google UI/permission prompt may need further handling. Local Chromium regression tests exercise representative controls, not Google's live page.

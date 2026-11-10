@@ -258,6 +258,9 @@ def test_media_off_verification_survives_changed_button_selector():
         off = False
         clicks = 0
 
+        def is_closed(self):
+            return False
+
         def locator(self, selector):
             page = self
 

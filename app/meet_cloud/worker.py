@@ -94,6 +94,20 @@ def make_summary(key):
             if row.transcript_ciphertext
             else []
         )
+        # A failed join has no captured meeting content. Do not imply a Google
+        # transcript is pending or call the summary model automatically. An explicit
+        # later refresh can still retrieve a transcript the account may access.
+        if not turns and row.status == "FAILED" and not row.details.get("explicit_summary_refresh"):
+            row.summary_state = "DONE"
+            row.transcript_ciphertext = ""
+            row.details = {
+                **row.details,
+                "summary_status": "NO_ATTENDANCE",
+                "summary_requested": False,
+                "summary_error": "The assistant did not join this meeting. No audio was captured and no automatic summary was requested.",
+            }
+            db.commit()
+            return
         source = "assemblyai"
         google_reason = ""
         if row.details.get("prefer_google_transcript", True):
@@ -129,6 +143,7 @@ def make_summary(key):
                 **row.details,
                 "summary_status": "READY",
                 "summary_source": source,
+                "summary_error": "",
                 "google_transcript_note": google_reason,
                 "summary_requested": False,
             }
@@ -175,7 +190,9 @@ async def attend(key, worker_id, shutdown):
                     return True
                 row.heartbeat_at = datetime.now(UTC)
                 if asyncio.get_running_loop().time() - last_save > 10:
-                    row.transcript_ciphertext = cipher.encrypt(json.dumps(list(turns.values())))
+                    row.transcript_ciphertext = (
+                        cipher.encrypt(json.dumps(list(turns.values()))) if turns else ""
+                    )
                     last_save = asyncio.get_running_loop().time()
                 connection = ConnectionStore(db).get_active(
                     user_id=user.id, provider="google_calendar"
@@ -303,8 +320,10 @@ async def attend(key, worker_id, shutdown):
                         ).verified
                     )
                     row.status = "COMPLETED" if verified else "PARTIAL" if admitted else "FAILED"
-                    row.transcript_ciphertext = cipher.encrypt(json.dumps(list(turns.values())))
-                    row.summary_state = "QUEUED"
+                    row.transcript_ciphertext = (
+                        cipher.encrypt(json.dumps(list(turns.values()))) if turns else ""
+                    )
+                    row.summary_state = "QUEUED" if admitted or turns else "DONE"
                     row.details = {
                         "reason": reason,
                         "admitted": admitted,
@@ -315,8 +334,18 @@ async def attend(key, worker_id, shutdown):
                             "prefer_google_transcript", True
                         ),
                         "google_wait_until": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
-                        "summary_status": "PENDING",
-                        "summary_requested": True,
+                        "summary_status": "PENDING" if admitted or turns else "NO_ATTENDANCE",
+                        "summary_requested": bool(admitted or turns),
+                        "summary_error": ""
+                        if admitted or turns
+                        else "The assistant did not join this meeting. No audio was captured.",
+                        "media_checks": [
+                            note
+                            for note in (
+                                result.evidence.notes if result and result.evidence else []
+                            )
+                            if note.startswith(("mic_muted_", "camera_off_"))
+                        ][-4:],
                     }
                     row.heartbeat_at = datetime.now(UTC)
                     db.commit()

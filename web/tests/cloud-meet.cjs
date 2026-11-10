@@ -43,6 +43,10 @@ async function main(){
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.getByRole('button',{name:'Delete stored notes',exact:true}).click();await page.getByText('No cloud sessions yet.',{exact:false}).waitFor();
   assert.equal(await page.getByText('We agreed to ship the fix.',{exact:false}).count(),0);
+  rows=[{id:'failed',title:'Failed media fixture',start:new Date().toISOString(),end:new Date().toISOString(),status:'FAILED',stop_requested:false,has_transcript:false,details:{reason:'MEDIA_NOT_CONFIRMED_OFF',summary_status:'NO_ATTENDANCE',media_checks:['mic_muted_confirmed_off','camera_off_not_confirmed_off']}}];
+  await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();
+  await page.getByText('Notes: No notes — assistant did not join',{exact:true}).waitFor();
+  await page.getByText('Media checks: mic muted confirmed off; camera off not confirmed off',{exact:true}).waitFor();
   console.log('PASS: cloud readiness, Calendar/consent gates, enable/pause/stop, notes, summary retry, deletion, mobile');
  }finally{if(browser)await browser.close();if(server){try{process.kill(-server.pid,'SIGTERM');}catch{}server.stdout.destroy();server.stderr.destroy();server.unref();}fs.rmSync(harness,{recursive:true,force:true});fs.rmSync(path.join(web,'.next','types','app','cloud-meet-harness'),{recursive:true,force:true});}
 }

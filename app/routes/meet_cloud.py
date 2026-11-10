@@ -207,7 +207,7 @@ def refresh_summary(key: str, db: Annotated[Session, Depends(get_db)]):
     ):
         raise HTTPException(409, "Summary generation is already running.")
     row.summary_state = "QUEUED"
-    row.details = {**row.details, "summary_requested": True}
+    row.details = {**row.details, "summary_requested": True, "explicit_summary_refresh": True}
     db.commit()
     return {"queued": True}
 

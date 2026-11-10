@@ -133,7 +133,41 @@ def test_cloud_native_driver_sets_permissions_before_page_navigation(monkeypatch
         leave_on_speech=False,
     )
     assert asyncio.run(joiner._launch_context()) == (handle, context)
-    assert grants == [(["microphone", "camera"], {"origin": "https://meet.google.com"})]
+    assert grants == [(["camera"], {"origin": "https://meet.google.com"})]
+
+
+@pytest.mark.parametrize("permission", ["denied", "granted", "prompt", "error"])
+def test_native_guest_microphone_permission_requires_confirmed_denial(monkeypatch, permission):
+    from app.meet_agent.joiner import MeetJoiner
+    from app.meet_cloud.browser import CloudJoiner
+
+    async def visible():
+        return False
+
+    async def evaluate(_):
+        if permission == "error":
+            raise RuntimeError("permission query failed")
+        return permission
+
+    async def fallback(*args):
+        return False
+
+    monkeypatch.setattr(MeetJoiner, "_toggle_media_off", fallback)
+    page = SimpleNamespace(
+        url="https://meet.google.com/meet/abc-defg-hij",
+        locator=lambda _: SimpleNamespace(first=SimpleNamespace(is_visible=visible)),
+        is_closed=lambda: False,
+        evaluate=evaluate,
+    )
+    evidence = SimpleNamespace(notes=[])
+    joiner = CloudJoiner(
+        audio=object(),
+        settings=SimpleNamespace(meet_cloud_browser_driver="native", meet_cloud_identity_mode="guest"),
+        on_turn=None, tick=None, leave_on_speech=False,
+    )
+    result = asyncio.run(joiner._toggle_media_off(page, (), "mic_muted", evidence))
+    assert result is (permission == "denied")
+    assert ("mic_muted_confirmed_off" in evidence.notes) is (permission == "denied")
 
 
 def test_cleanup_reaps_process_that_exits_during_termination():

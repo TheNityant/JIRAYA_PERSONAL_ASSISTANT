@@ -228,7 +228,7 @@ class CloudJoiner(MeetJoiner):
             handle, context = await launch(engine, self.profile_dir, self.audio.name)
             try:
                 await context.grant_permissions(
-                    ["microphone", "camera"], origin="https://meet.google.com"
+                    ["camera"], origin="https://meet.google.com"
                 )
                 return handle, context
             except BaseException:
@@ -306,6 +306,26 @@ class CloudJoiner(MeetJoiner):
             if await field.is_visible():
                 await field.fill(self.display_name)
                 break
+        # This native guest context denies microphone access before navigation.
+        # Meet may still show an enabled toggle when no input device exists.
+        if (
+            label == "mic_muted"
+            and getattr(self.settings, "meet_cloud_browser_driver", "playwright") == "native"
+            and getattr(self.settings, "meet_cloud_identity_mode", "guest") == "guest"
+            and urlsplit(page.url).scheme == "https"
+            and urlsplit(page.url).hostname == "meet.google.com"
+            and not self._cancelled()
+            and not page.is_closed()
+        ):
+            try:
+                state = await page.evaluate(
+                    "async () => (await navigator.permissions.query({name: 'microphone'})).state"
+                )
+                if state == "denied":
+                    evidence.notes.append("mic_muted_confirmed_off")
+                    return True
+            except Exception:  # noqa: BLE001 - continue with the explicit control check
+                evidence.notes.append("mic_permission_check_unavailable")
         return await super()._toggle_media_off(page, selectors, label, evidence)
 
     async def _media_failure(self, page, evidence):
@@ -367,7 +387,7 @@ class CloudJoiner(MeetJoiner):
                     (sf.PREJOIN_MIC_MUTE_SELECTORS, "mic_muted"),
                     (sf.PREJOIN_CAMERA_OFF_SELECTORS, "camera_off"),
                 ):
-                    if not await super()._toggle_media_off(page, selectors, label, evidence):
+                    if not await self._toggle_media_off(page, selectors, label, evidence):
                         # A spoken leave/stop may arrive while the async media
                         # probe is running. The base probe stops on cancellation;
                         # leave immediately instead of reporting a media failure.

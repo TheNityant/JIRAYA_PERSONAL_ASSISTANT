@@ -142,3 +142,66 @@ def test_failed_prejoin_capture_masks_inputs_and_does_not_capture_login_pages():
                 await browser.close()
 
     asyncio.run(run())
+
+
+def test_persistent_browser_reuses_cookie_after_close_and_isolates_other_profiles(tmp_path):
+    """Local fixture proves profile storage/reuse, not actual Google acceptance."""
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+
+    from app.meet_cloud.profiles import profile_path
+
+    async def run():
+        from playwright.async_api import async_playwright
+
+        config = json.loads(Path(os.environ["JIRAYA_CHROMIUM_CONFIG"]).read_text())
+        directory = profile_path(str(tmp_path), "user-a", "fixture@example.test")
+        async with async_playwright() as pw:
+
+            async def launch(profile):
+                return await pw.chromium.launch_persistent_context(
+                    str(profile),
+                    executable_path=config["executablePath"],
+                    args=config["args"],
+                    headless=True,
+                )
+
+            first = await launch(directory)
+            await first.add_cookies(
+                [
+                    {
+                        "name": "fixture-session",
+                        "value": "fixture",
+                        "domain": "example.test",
+                        "path": "/",
+                        "expires": (datetime.now(UTC) + timedelta(days=1)).timestamp(),
+                    }
+                ]
+            )
+            await first.close()
+            second = await launch(directory)
+            assert any(c["name"] == "fixture-session" for c in await second.cookies())
+            # A delayed chip must not incorrectly request reauthentication.
+            await second.route(
+                "https://meet.google.com/**",
+                lambda route: route.fulfill(
+                    body="""<script>setTimeout(()=>{document.body.innerHTML='<button aria-label="Google Account: Fixture (fixture@example.test)">Account</button>'}, 400)</script>""",
+                    content_type="text/html",
+                ),
+            )
+            joiner = CloudJoiner(
+                audio=object(),
+                settings=SimpleNamespace(meet_cloud_identity_mode="google_profile"),
+                expected_account="fixture@example.test",
+                on_turn=None,
+                tick=None,
+                leave_on_speech=False,
+            )
+            assert await joiner.check_session(second.pages[0])
+            assert joiner.identity_verified
+            await second.close()
+            third = await launch(profile_path(str(tmp_path), "user-b", "fixture@example.test"))
+            assert not await third.cookies()
+            await third.close()
+
+    asyncio.run(run())

@@ -915,3 +915,194 @@ def test_operator_signin_setup_verifies_and_closes_desktop(cloud, monkeypatch, t
     assert len(processes) == 3 and all(proc.returncode is not None for proc in processes)
     assert not options["headless"]
     assert "DATABASE_URL" not in options["env"] and "ASSEMBLYAI_API_KEY" not in options["env"]
+
+
+def test_browser_readiness_gates_enable_and_uses_worker_mode(cloud):
+    from app.meet_cloud.identity import set_browser_status
+    from app.meet_cloud.worker import heartbeat
+
+    user, _, _ = cloud
+    heartbeat("profile-worker", "google_profile")  # API env still defaults to guest.
+    with account_scope(user, user + "@example.test"), TestClient(app) as client:
+        status = client.get("/meet/cloud/status").json()
+        assert status["identity_mode"] == "google_profile"
+        assert status["browser_connection"]["state"] == "SETUP_REQUIRED"
+        assert (
+            client.put("/meet/cloud/settings", json={"enabled": True, "consent": True}).status_code
+            == 409
+        )
+        # Browser input cannot assert that an AWS profile is authenticated.
+        assert (
+            client.put(
+                "/meet/cloud/settings",
+                json={
+                    "enabled": True,
+                    "consent": True,
+                    "browser_connection": {"state": "CONNECTED"},
+                },
+            ).status_code
+            == 409
+        )
+        with SessionLocal() as db:
+            set_browser_status(db, user, "fixture@example.test", "CONNECTED")
+        result = client.put("/meet/cloud/settings", json={"enabled": True, "consent": True})
+        assert result.status_code == 200
+        assert result.json()["browser_connection"]["last_verified_at"]
+        with SessionLocal() as db:
+            set_browser_status(db, user, "fixture@example.test", "RECONNECT_REQUIRED")
+        assert (
+            client.put("/meet/cloud/settings", json={"enabled": True, "consent": True}).status_code
+            == 409
+        )
+
+
+def test_browser_state_isolated_by_user_and_calendar_and_notifications_deduped(cloud):
+    from app.meet_cloud.identity import browser_status, set_browser_status
+    from app.services.notification_store import NotificationStore
+
+    user, _, _ = cloud
+    with SessionLocal() as db:
+        set_browser_status(db, user, "fixture@example.test", "CONNECTED")
+        set_browser_status(db, user, "fixture@example.test", "RECONNECT_REQUIRED")
+        set_browser_status(db, user, "fixture@example.test", "RECONNECT_REQUIRED")
+        assert len(NotificationStore(db).list_recent(user_id=user, category="ACTION_REQUIRED")) == 1
+        assert browser_status(db, "other-user", "fixture@example.test")["state"] == "SETUP_REQUIRED"
+        assert browser_status(db, user, "different@example.test")["state"] == "SETUP_REQUIRED"
+        set_browser_status(db, user, "fixture@example.test", "CONNECTED")
+        set_browser_status(db, user, "fixture@example.test", "RECONNECT_REQUIRED")
+        assert len(NotificationStore(db).list_recent(user_id=user, category="ACTION_REQUIRED")) == 2
+
+
+def test_queued_profile_job_cannot_bypass_initial_setup(cloud, monkeypatch):
+    from app.meet_cloud import worker
+
+    _user, key, event = cloud
+    monkeypatch.setattr(get_base_settings(), "meet_cloud_identity_mode", "google_profile")
+    monkeypatch.setattr(
+        worker, "AudioSink", lambda *args: pytest.fail("Unconfigured browser started audio")
+    )
+    monkeypatch.setattr(
+        worker,
+        "upcoming_meetings",
+        lambda db: {
+            "status": "READY",
+            "calendar_account": "fixture@example.test",
+            "items": [event],
+        },
+    )
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        row.worker_id, row.status = "fixture-worker", "STARTING"
+        db.commit()
+    asyncio.run(worker.attend(key, "fixture-worker", asyncio.Event()))
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        assert row.status == "FAILED"
+        assert row.details["reason"] == "BROWSER_SETUP_REQUIRED"
+        assert row.details["summary_status"] == "NO_ATTENDANCE"
+
+
+@pytest.mark.parametrize(
+    "reason", ["GOOGLE_SESSION_MISSING", "LOGIN_WALL_MIDFLOW", "GOOGLE_JOIN_REJECTED"]
+)
+def test_profile_loss_requests_reconnect_but_admission_rejection_does_not(
+    cloud, monkeypatch, reason
+):
+    from app.meet_agent.joiner import JoinEvidence, JoinResult
+    from app.meet_cloud import worker
+    from app.meet_cloud.identity import browser_status, set_browser_status
+
+    user, key, event = cloud
+    monkeypatch.setattr(get_base_settings(), "meet_cloud_identity_mode", "google_profile")
+
+    async def nop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(
+        worker, "AudioSink", lambda name: SimpleNamespace(name=name, setup=nop, close=nop)
+    )
+    monkeypatch.setattr(
+        worker,
+        "upcoming_meetings",
+        lambda db: {
+            "status": "READY",
+            "calendar_account": "fixture@example.test",
+            "items": [event],
+        },
+    )
+
+    class Browser:
+        leave_reason = ""
+        identity_verified = reason != "GOOGLE_SESSION_MISSING"
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def join(self, url):
+            return JoinResult("FAILED", reason, JoinEvidence(url))
+
+    monkeypatch.setattr(worker, "CloudJoiner", Browser)
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        row.worker_id, row.status = "fixture-worker", "STARTING"
+        db.commit()
+        set_browser_status(db, user, "fixture@example.test", "CONNECTED")
+    asyncio.run(worker.attend(key, "fixture-worker", asyncio.Event()))
+    with SessionLocal() as db:
+        expected = "CONNECTED" if reason == "GOOGLE_JOIN_REJECTED" else "RECONNECT_REQUIRED"
+        assert browser_status(db, user, "fixture@example.test")["state"] == expected
+        if expected == "RECONNECT_REQUIRED":
+            worker.discover(get_base_settings())  # Must not enqueue another login attempt.
+            assert browser_status(db, user, "fixture@example.test")["state"] == expected
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_saved_profile_check_is_headless_and_never_opens_interactive_setup(
+    cloud, monkeypatch, tmp_path, valid
+):
+    from app.meet_cloud import auth
+    from app.meet_cloud.identity import browser_status
+    from app.meet_cloud.profiles import profile_path
+
+    user, _, _ = cloud
+    settings = get_base_settings()
+    monkeypatch.setattr(settings, "meet_cloud_profile_root", str(tmp_path))
+    directory = profile_path(str(tmp_path), user, "fixture@example.test")
+    directory.mkdir()
+    launches = []
+
+    async def nop():
+        pass
+
+    async def launch(self):
+        launches.append(self.profile_dir)
+        return SimpleNamespace(stop=nop), SimpleNamespace(pages=[object()], close=nop)
+
+    async def verify(self, page):
+        return valid
+
+    monkeypatch.setattr(CloudJoiner, "_launch_context", launch)
+    monkeypatch.setattr(CloudJoiner, "check_session", verify)
+    monkeypatch.setattr(auth, "setup", lambda *args: pytest.fail("Interactive sign-in requested"))
+    assert asyncio.run(auth.check_saved_session(user + "@example.test")) is valid
+    assert asyncio.run(auth.check_saved_session(user + "@example.test")) is valid
+    assert launches == [str(directory), str(directory)]
+    with SessionLocal() as db:
+        assert browser_status(db, user, "fixture@example.test")["state"] == (
+            "CONNECTED" if valid else "RECONNECT_REQUIRED"
+        )
+
+
+def test_reconnected_profile_retires_only_its_own_unread_alerts(cloud):
+    from app.meet_cloud.identity import set_browser_status
+    from app.services.notification_store import NotificationStore
+
+    user, _, _ = cloud
+    with SessionLocal() as db:
+        set_browser_status(db, user, "fixture@example.test", "RECONNECT_REQUIRED")
+        set_browser_status(db, user, "other@example.test", "RECONNECT_REQUIRED")
+        set_browser_status(db, user, "fixture@example.test", "CONNECTED")
+        alerts = NotificationStore(db).list_recent(user_id=user, unread_only=True)
+        assert len(alerts) == 1
+        set_browser_status(db, user, "other@example.test", "CONNECTED")
+        assert not NotificationStore(db).list_recent(user_id=user, unread_only=True)

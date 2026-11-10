@@ -1,4 +1,4 @@
-"""One guest browser and one private audio sink per cloud worker session."""
+"""One isolated browser and one private audio sink per cloud worker session."""
 
 import asyncio
 import base64
@@ -191,6 +191,7 @@ class CloudJoiner(MeetJoiner):
         self.leave_on_speech = leave_on_speech
         self.leave_reason = ""
         self.failure_debug = None
+        self.identity_verified = False
 
     async def join(self, meet_url):
         from app.meet_agent.link_detector import is_valid_meet_link
@@ -249,11 +250,23 @@ class CloudJoiner(MeetJoiner):
 
     async def check_session(self, page, **kwargs):
         if getattr(self.settings, "meet_cloud_identity_mode", "guest") == "google_profile":
+            from playwright.async_api import TimeoutError as BrowserTimeout
+
             from app.meet_cloud.profiles import account_matches
 
             if not await super().check_session(page, **kwargs):
-                return False
-            return await account_matches(page, self.expected_account)
+                # DOMContentLoaded precedes the account chip on a cold browser.
+                # Do not mistake ordinary hydration for an expired session.
+                try:
+                    await page.locator('[aria-label*="Google Account" i]:visible').first.wait_for(
+                        state="visible", timeout=10_000
+                    )
+                except BrowserTimeout:
+                    return False
+                if not await super().check_session(page, navigate=False):
+                    return False
+            self.identity_verified = await account_matches(page, self.expected_account)
+            return self.identity_verified
         return True  # Guest mode has no Google browser session.
 
     async def _toggle_media_off(self, page, selectors, label, evidence):

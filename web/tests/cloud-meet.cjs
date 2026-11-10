@@ -32,6 +32,14 @@ async function main(){
   status.configured=true;await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByText('The cloud worker is offline.',{exact:false}).waitFor();
   status.worker_online=true;await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByText('Cloud worker online',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Connect Google Calendar',exact:true}).click();assert.equal(await enable.isEnabled(),false);
+  status.identity_mode='google_profile';status.browser_connection={state:'SETUP_REQUIRED',last_verified_at:null,requires_interactive_setup:true};
+  await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByRole('heading',{name:'Meeting browser setup required',exact:true}).waitFor();
+  await page.getByRole('checkbox',{name:/I have permission to add a transcription bot/}).check();assert.equal(await enable.isEnabled(),false,'OAuth and online worker cannot substitute for browser setup');
+  status.browser_connection={state:'CONNECTED',last_verified_at:new Date().toISOString(),requires_interactive_setup:false};
+  await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByRole('heading',{name:'Meeting browser connected',exact:true}).waitFor();assert.equal(await enable.isEnabled(),true);
+  status.browser_connection.state='RECONNECT_REQUIRED';
+  await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();await page.getByRole('heading',{name:'Reconnect your meeting browser',exact:true}).waitFor();assert.equal(await enable.isEnabled(),false);
+  status.identity_mode='guest';await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();
   await page.getByRole('checkbox',{name:/I have permission to add a transcription bot/}).check();await enable.click();
   await page.getByRole('button',{name:'Pause cloud attendance and leave',exact:true}).waitFor();assert.equal(writes.length,1);
   rows=[{id:'fixture',title:'Test meeting',start:'2026-11-08T10:00:00Z',end:'2026-11-08T11:00:00Z',status:'JOINED',stop_requested:false,has_transcript:true,details:{summary_status:'PENDING'}}];

@@ -17,6 +17,7 @@ from app.config import get_base_settings, get_settings
 from app.db import SessionLocal, init_db
 from app.meet_agent.verifier import verify_join
 from app.meet_cloud.browser import AudioSink, CloudJoiner
+from app.meet_cloud.identity import browser_status, set_browser_status
 from app.meet_cloud.profiles import profile_path
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, claim, claim_summary, enqueue
 from app.meet_cloud.transcripts import google_transcript, summarize
@@ -32,10 +33,15 @@ from app.services.runtime_state_store import RuntimeStateStore
 logger = logging.getLogger(__name__)
 
 
-def heartbeat(worker_id):
+def heartbeat(worker_id, identity_mode="guest"):
     with SessionLocal() as db:
         RuntimeStateStore(db).set(
-            "cloud-meet-worker", {"at": datetime.now(UTC).isoformat(), "worker": worker_id}
+            "cloud-meet-worker",
+            {
+                "at": datetime.now(UTC).isoformat(),
+                "worker": worker_id,
+                "identity_mode": identity_mode,
+            },
         )
 
 
@@ -70,6 +76,11 @@ def discover(settings):
                     "calendar_account"
                 ) != preference.preferences.get("calendar_account"):
                     continue
+                if settings.meet_cloud_identity_mode == "google_profile":
+                    browser = browser_status(db, user_id, feed["calendar_account"])
+                    if browser["state"] != "CONNECTED":
+                        set_browser_status(db, user_id, feed["calendar_account"], browser["state"])
+                        continue
                 now = datetime.now(UTC)
                 for event in feed["items"]:
                     if -120 <= (datetime.fromisoformat(event["start"]) - now).total_seconds() <= 30:
@@ -258,6 +269,21 @@ async def attend(key, worker_id, shutdown):
                 datetime.now(UTC) + timedelta(minutes=settings.meet_cloud_max_minutes),
             )
             preferences = dict(preference.preferences)
+            if settings.meet_cloud_identity_mode == "google_profile":
+                browser = browser_status(db, user.id, session.calendar_account)
+                if browser["state"] != "CONNECTED":
+                    session.status = "FAILED"
+                    session.summary_state = "DONE"
+                    session.details = {
+                        "reason": "BROWSER_SETUP_REQUIRED"
+                        if browser["state"] == "SETUP_REQUIRED"
+                        else "GOOGLE_SESSION_MISSING",
+                        "admitted": False,
+                        "summary_status": "NO_ATTENDANCE",
+                    }
+                    db.commit()
+                    set_browser_status(db, user.id, session.calendar_account, browser["state"])
+                    return
         if await tick():
             with SessionLocal() as db:
                 row = db.get(CloudMeetSession, key)
@@ -360,6 +386,13 @@ async def attend(key, worker_id, shutdown):
                         row.details["prejoin_debug_ciphertext"] = cipher.encrypt(json.dumps(debug))
                     row.heartbeat_at = datetime.now(UTC)
                     db.commit()
+                    if settings.meet_cloud_identity_mode == "google_profile":
+                        if reason in {"GOOGLE_SESSION_MISSING", "LOGIN_WALL_MIDFLOW"}:
+                            set_browser_status(
+                                db, user.id, row.calendar_account, "RECONNECT_REQUIRED"
+                            )
+                        elif getattr(joiner, "identity_verified", False):
+                            set_browser_status(db, user.id, row.calendar_account, "CONNECTED")
 
 
 async def preflight():
@@ -400,7 +433,7 @@ async def serve(settings, shutdown=None):
     async def health():
         while not shutdown.is_set():
             try:
-                await asyncio.to_thread(heartbeat, worker_id)
+                await asyncio.to_thread(heartbeat, worker_id, settings.meet_cloud_identity_mode)
             except Exception:  # noqa: BLE001 - lost control database must stop attendance
                 logger.warning("Cloud worker lost database control access; stopping")
                 shutdown.set()

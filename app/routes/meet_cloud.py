@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
+from app.meet_cloud.identity import browser_status, identity_mode
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, pack, pause
 from app.models import CloudMeetSession, CloudMeetSettings
 from app.routes.meet import upcoming_meetings
@@ -52,7 +53,10 @@ def status(db: Annotated[Session, Depends(get_db)]):
     )
     return {
         **availability(db, settings),
-        "identity_mode": settings.meet_cloud_identity_mode,
+        "identity_mode": identity_mode(db, settings),
+        "browser_connection": browser_status(
+            db, settings.dev_user_id, connection.provider_account_id if connection else None
+        ),
         "enabled": bool(preference and preference.enabled),
         "preferences": preference.preferences if preference else {},
         "google_transcript_authorized": bool(connection and MEET_READ_SCOPE in connection.scopes),
@@ -82,6 +86,14 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
         except HTTPException:
             feed = {"items": [], "status": "CALENDAR_ACCESS_FAILED"}
     checks.append({"name": "Calendar connected and readable", "ok": feed["status"] == "READY"})
+    mode = identity_mode(db, settings)
+    browser = browser_status(
+        db, settings.dev_user_id, connection.provider_account_id if connection else None
+    )
+    if mode == "google_profile":
+        checks.append(
+            {"name": "Google browser session last verified", "ok": browser["state"] == "CONNECTED"}
+        )
     preference = db.get(CloudMeetSettings, settings.dev_user_id)
     checks.append(
         {"name": "Attendance enabled by you", "ok": bool(preference and preference.enabled)}
@@ -105,9 +117,10 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
     ]
     return {
         **ready,
-        "identity_mode": settings.meet_cloud_identity_mode,
+        "identity_mode": mode,
+        "browser_connection": browser,
         "display_name": "Connected Google browser account"
-        if settings.meet_cloud_identity_mode == "google_profile"
+        if mode == "google_profile"
         else "Jiraya · AI meeting notes",
         "checks": checks,
         "calendar_status": feed["status"],
@@ -116,8 +129,8 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
         "next_start": min(items, key=lambda event: datetime.fromisoformat(event["start"]))["start"]
         if items
         else None,
-        "message": "Google-profile mode requires one-time sign-in through the operator-assisted AWS desktop. Every attempt verifies the Google browser account matches Calendar; no guest fallback is used."
-        if settings.meet_cloud_identity_mode == "google_profile"
+        "message": "The saved Google browser session is reused across meetings and restarts. Initial setup is operator-assisted; reconnect if Google invalidates it. Calendar OAuth and worker heartbeat do not establish browser sign-in. Every join checks the account again; no guest fallback is used."
+        if mode == "google_profile"
         else "Cloud attendance uses an anonymous guest, not your Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
     }
 
@@ -148,6 +161,15 @@ def configure(body: Preferences, db: Annotated[Session, Depends(get_db)]):
     )
     if not connection:
         raise HTTPException(409, "Connect Google Calendar first.")
+    if (
+        identity_mode(db, settings) == "google_profile"
+        and browser_status(db, settings.dev_user_id, connection.provider_account_id)["state"]
+        != "CONNECTED"
+    ):
+        raise HTTPException(
+            409,
+            "Connect your Google meeting browser first. Calendar OAuth is separate. Complete initial AWS browser setup, then enable attendance; future meetings reuse the saved session.",
+        )
     TokenCipher(settings.token_encryption_key)
     row = db.get(CloudMeetSettings, settings.dev_user_id) or CloudMeetSettings(
         id=settings.dev_user_id, user_id=settings.dev_user_id

@@ -154,3 +154,8 @@ The AWS worker explicitly grants its virtual microphone/camera permission to the
 Earlier failed sessions cannot gain a screenshot retroactively. After updating the worker, create a fresh event; if it fails, inspect the captured screen instead of guessing which Google UI the worker encountered. Browser-control fixture tests do not prove a live meeting's pre-join UI matches the fixtures.
 
 `Dockerfile.meet` now installs system/Python/Chromium dependencies before copying source code, deriving the dependency list from `pyproject.toml`. The first build after this Dockerfile change rebuilds those layers once. Subsequent source-only builds can reuse them if the Docker cache remains available. Dependency or base-image changes still require rebuilding them.
+
+
+## Google-account attendance pilot
+
+Optional persistent Google browser profiles and operator-assisted SSH-tunnelled sign-in are now available. See [AWS Google sign-in setup](AWS_GOOGLE_SIGNIN.md). Set `MEET_CLOUD_IDENTITY_MODE=google_profile` only after configuring that workflow. This replaces guest identity for that mode; it does not exchange API tokens for browser cookies, and requires live Google sign-in and admission testing. Earlier descriptions of anonymous-only behavior apply to `guest` mode.

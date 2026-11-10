@@ -17,6 +17,7 @@ from app.config import get_base_settings, get_settings
 from app.db import SessionLocal, init_db
 from app.meet_agent.verifier import verify_join
 from app.meet_cloud.browser import AudioSink, CloudJoiner
+from app.meet_cloud.profiles import profile_path
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, claim, claim_summary, enqueue
 from app.meet_cloud.transcripts import google_transcript, summarize
 from app.models import CloudMeetSession, CloudMeetSettings, RuntimeState, User
@@ -292,7 +293,14 @@ async def attend(key, worker_id, shutdown):
                     on_turn=turn,
                     tick=tick,
                     leave_on_speech=preferences.get("leave_on_speech", True),
-                    profile_dir=str(Path(directory) / "profile"),
+                    expected_account=session.calendar_account,
+                    profile_dir=str(
+                        profile_path(
+                            settings.meet_cloud_profile_root, user.id, session.calendar_account
+                        )
+                    )
+                    if settings.meet_cloud_identity_mode == "google_profile"
+                    else str(Path(directory) / "profile"),
                     evidence_dir=str(Path(directory) / "evidence"),
                     stay_seconds=max(1, (ends - datetime.now(UTC)).total_seconds()),
                     stop_event=stop,

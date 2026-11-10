@@ -179,8 +179,11 @@ async def listen(settings, audio, on_turn):
 
 
 class CloudJoiner(MeetJoiner):
-    def __init__(self, *, audio, settings, on_turn, tick, leave_on_speech, **kwargs):
+    def __init__(
+        self, *, audio, settings, on_turn, tick, leave_on_speech, expected_account="", **kwargs
+    ):
         super().__init__(headless=True, auth_grace_seconds=0, **kwargs)
+        self.expected_account = expected_account
         self.audio = audio
         self.settings = settings
         self.on_turn = on_turn
@@ -188,6 +191,16 @@ class CloudJoiner(MeetJoiner):
         self.leave_on_speech = leave_on_speech
         self.leave_reason = ""
         self.failure_debug = None
+
+    async def join(self, meet_url):
+        from app.meet_agent.link_detector import is_valid_meet_link
+
+        if is_valid_meet_link(meet_url):
+            # Calendar links can select a different browser account with authuser.
+            # Keep the canonical room, never transfer a local account index to AWS.
+            parsed = urlsplit(meet_url)
+            meet_url = f"https://meet.google.com{parsed.path}"
+        return await super().join(meet_url)
 
     async def _launch_context(self):
         from playwright.async_api import async_playwright
@@ -235,10 +248,20 @@ class CloudJoiner(MeetJoiner):
         return await super()._check_any_visible(page, selectors)
 
     async def check_session(self, page, **kwargs):
-        return True  # Guest flow. Never log in as, impersonate, or store a user's Google session.
+        if getattr(self.settings, "meet_cloud_identity_mode", "guest") == "google_profile":
+            from app.meet_cloud.profiles import account_matches
+
+            if not await super().check_session(page, **kwargs):
+                return False
+            return await account_matches(page, self.expected_account)
+        return True  # Guest mode has no Google browser session.
 
     async def _toggle_media_off(self, page, selectors, label, evidence):
-        for selector in ('input[placeholder="Your name"]', 'input[aria-label="Your name"]'):
+        for selector in (
+            ()
+            if getattr(self.settings, "meet_cloud_identity_mode", "guest") == "google_profile"
+            else ('input[placeholder="Your name"]', 'input[aria-label="Your name"]')
+        ):
             field = page.locator(selector).first
             if await field.is_visible():
                 await field.fill("Jiraya · AI meeting notes")

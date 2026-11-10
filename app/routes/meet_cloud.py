@@ -52,6 +52,7 @@ def status(db: Annotated[Session, Depends(get_db)]):
     )
     return {
         **availability(db, settings),
+        "identity_mode": settings.meet_cloud_identity_mode,
         "enabled": bool(preference and preference.enabled),
         "preferences": preference.preferences if preference else {},
         "google_transcript_authorized": bool(connection and MEET_READ_SCOPE in connection.scopes),
@@ -104,8 +105,10 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
     ]
     return {
         **ready,
-        "identity_mode": "anonymous_guest",
-        "display_name": "Jiraya · AI meeting notes",
+        "identity_mode": settings.meet_cloud_identity_mode,
+        "display_name": "Connected Google browser account"
+        if settings.meet_cloud_identity_mode == "google_profile"
+        else "Jiraya · AI meeting notes",
         "checks": checks,
         "calendar_status": feed["status"],
         "eligible_events": len(items),
@@ -113,7 +116,9 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
         "next_start": min(items, key=lambda event: datetime.fromisoformat(event["start"]))["start"]
         if items
         else None,
-        "message": "Cloud attendance uses an anonymous guest, not your Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
+        "message": "Google-profile mode requires one-time sign-in through the operator-assisted AWS desktop. Every attempt verifies the Google browser account matches Calendar; no guest fallback is used."
+        if settings.meet_cloud_identity_mode == "google_profile"
+        else "Cloud attendance uses an anonymous guest, not your Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
     }
 
 

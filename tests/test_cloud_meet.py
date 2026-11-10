@@ -188,7 +188,7 @@ def test_cloud_attendance_persists_encrypted_turns_and_never_speaks(cloud, monke
 
     user, key, event = cloud
 
-    async def nop(*args):
+    async def nop(*args, **kwargs):
         pass
 
     monkeypatch.setattr(
@@ -360,7 +360,7 @@ def test_live_capture_failure_leaves_and_marks_partial(cloud, monkeypatch):
 
     user, key, event = cloud
 
-    async def nop(*args):
+    async def nop(*args, **kwargs):
         pass
 
     monkeypatch.setattr(
@@ -667,7 +667,7 @@ def test_cloud_diagnostics_is_read_only_and_reports_own_calendar(cloud, monkeypa
         response = client.get("/meet/cloud/diagnostics")
         assert response.status_code == 200
         data = response.json()
-        assert data["identity_mode"] == "anonymous_guest"
+        assert data["identity_mode"] == "guest"
         assert data["eligible_events"] == data["events_in_join_window"] == 1
         assert data["worker_online"] and data["worker_last_seen"]
         assert all(check["ok"] for check in data["checks"])
@@ -714,7 +714,7 @@ def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(cloud,
 
     user, key, event = cloud
 
-    async def nop(*args):
+    async def nop(*args, **kwargs):
         pass
 
     monkeypatch.setattr(
@@ -847,3 +847,71 @@ def test_prejoin_debug_is_encrypted_and_only_in_owners_detail(cloud):
     with account_scope("other-debug-user", "other@example.test"), TestClient(app) as client:
         assert client.get("/meet/cloud/sessions/" + key).status_code == 404
         assert "PRIVATE-SCREENSHOT" not in client.get("/meet/cloud/sessions").text
+
+
+@pytest.mark.parametrize("signed_in", [True, False])
+def test_operator_signin_setup_verifies_and_closes_desktop(cloud, monkeypatch, tmp_path, signed_in):
+    import playwright.async_api
+
+    from app.meet_cloud import auth
+
+    user, _, _ = cloud
+    settings = get_settings()
+    settings.meet_cloud_profile_root = str(tmp_path)
+    monkeypatch.setattr(auth, "get_base_settings", lambda: settings)
+    processes, options = [], {}
+
+    class Process:
+        returncode = None
+
+        def terminate(self):
+            self.returncode = 0
+
+        def kill(self):
+            self.returncode = -9
+
+        async def wait(self):
+            return self.returncode
+
+    async def start(*args, **kwargs):
+        proc = Process()
+        processes.append(proc)
+        return proc
+
+    async def nop(*args, **kwargs):
+        pass
+
+    async def verified(*args):
+        return signed_in
+
+    context = SimpleNamespace(pages=[SimpleNamespace(goto=nop)], close=nop)
+
+    async def launch(*args, **kwargs):
+        options.update(kwargs)
+        return context
+
+    class Playwright:
+        async def __aenter__(self):
+            return SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+
+        async def __aexit__(self, *args):
+            pass
+
+    original_exists = auth.os.path.exists
+    monkeypatch.setattr(
+        auth.os.path,
+        "exists",
+        lambda path: True if path == "/tmp/.X11-unix/X99" else original_exists(path),
+    )
+    monkeypatch.setattr(auth.asyncio, "create_subprocess_exec", start)
+    monkeypatch.setattr(auth.asyncio, "sleep", nop)
+    monkeypatch.setattr(auth, "account_matches", verified)
+    monkeypatch.setattr(playwright.async_api, "async_playwright", Playwright)
+    if signed_in:
+        asyncio.run(auth.setup(user + "@example.test"))
+    else:
+        with pytest.raises(RuntimeError, match="not verified"):
+            asyncio.run(auth.setup(user + "@example.test"))
+    assert len(processes) == 3 and all(proc.returncode is not None for proc in processes)
+    assert not options["headless"]
+    assert "DATABASE_URL" not in options["env"] and "ASSEMBLYAI_API_KEY" not in options["env"]

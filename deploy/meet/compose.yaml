@@ -9,6 +9,8 @@ services:
     env_file:
       - path: ../../.env.meet
         format: raw
+    volumes:
+      - google-profiles:/home/jiraya/google_profiles
     restart: unless-stopped
     stop_grace_period: 60s
     shm_size: 512m
@@ -21,4 +23,6 @@ services:
       options:
         max-size: 10m
         max-file: "3"
-    # No published ports, host networking, Docker socket, or Google login profiles.
+    # Normal attendance publishes no ports. Sign-in is a separate loopback-only command.
+volumes:
+  google-profiles:

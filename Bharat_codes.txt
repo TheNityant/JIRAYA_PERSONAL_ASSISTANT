@@ -1,0 +1,18 @@
+Project: JIRAYA Personal Assistant
+
+Team:
+- Jai Lohar
+- Nityant Tiwari
+
+Category: Work & Automation
+
+BharatCode Integration:
+Provider: BharatCode
+Model: Qwen 3.8 27B
+
+Purpose:
+AI-assisted personal workflow automation,
+GitHub activity summaries and email assistance.
+
+Repository:
+https://github.com/TheNityant/JIRAYA_PERSONAL_ASSISTANT/

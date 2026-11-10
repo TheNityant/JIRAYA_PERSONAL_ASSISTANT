@@ -145,3 +145,12 @@ Newer Google `/v3/signin` and AccountChooser routes are now recognised as sign-i
 New failed sessions store bounded media-check outcomes, identifying which device was confirmed off. They show `NO_ATTENDANCE`, and do not automatically poll Google or charge a summary model. Legacy failed sessions still in the summary queue are corrected when processed by the updated worker. An explicit transcript refresh after the scheduled meeting end can still request a Google transcript available to the connected account.
 
 After deploying/rebuilding the AWS worker, test with a new event 5–10 minutes ahead. Old failed attendance attempts are not automatically replayed. If the failure remains, share the displayed media-check outcomes; an actual Google UI/permission prompt may need further handling. Local Chromium regression tests exercise representative controls, not Google's live page.
+
+
+## Inspect the actual failed pre-join screen
+
+The AWS worker explicitly grants its virtual microphone/camera permission to the Meet origin before navigation. The media-off proof remains mandatory. If that still fails, **View notes → Failed pre-join screen** shows the actual browser screen and visible media/join/permission control labels. The capture happens before joining, only on the exact HTTPS Meet host; Google sign-in pages are excluded. Input fields and account controls are masked, but meeting information may still be visible. Screenshots are bounded to 256 KB before encryption, stored encrypted with the session, excluded from session-list responses, and decrypted only in the owning account's detail view. The usual session deletion and worker retention purge remove them. They are never sent to AssemblyAI or the summary model.
+
+Earlier failed sessions cannot gain a screenshot retroactively. After updating the worker, create a fresh event; if it fails, inspect the captured screen instead of guessing which Google UI the worker encountered. Browser-control fixture tests do not prove a live meeting's pre-join UI matches the fixtures.
+
+`Dockerfile.meet` now installs system/Python/Chromium dependencies before copying source code, deriving the dependency list from `pyproject.toml`. The first build after this Dockerfile change rebuilds those layers once. Subsequent source-only builds can reuse them if the Docker cache remains available. Dependency or base-image changes still require rebuilding them.

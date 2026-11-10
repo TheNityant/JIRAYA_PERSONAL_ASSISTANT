@@ -347,6 +347,9 @@ async def attend(key, worker_id, shutdown):
                             if note.startswith(("mic_muted_", "camera_off_"))
                         ][-4:],
                     }
+                    debug = getattr(joiner, "failure_debug", None)
+                    if not admitted and debug:
+                        row.details["prejoin_debug_ciphertext"] = cipher.encrypt(json.dumps(debug))
                     row.heartbeat_at = datetime.now(UTC)
                     db.commit()
 

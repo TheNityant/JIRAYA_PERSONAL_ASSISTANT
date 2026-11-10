@@ -21,7 +21,7 @@ async function main(){
    if(req.method()==='DELETE'){rows=[];return route.fulfill({json:{deleted:true}});}
    if(relative.endsWith('/stop')){writes.push('stop');rows[0].stop_requested=true;return route.fulfill({json:{stop_requested:true}});}
    if(relative.endsWith('/summary')){writes.push('summary');return route.fulfill({json:{queued:true}});}
-   return route.fulfill({json:{...rows[0],summary:'{"overview":"We agreed to ship the fix."}',transcript:[{speaker:'unknown',text:'Ship the fix',at:'fixture'}]}});
+   return route.fulfill({json:{...rows[0],prejoin_debug:rows[0].status==='FAILED'?{captured_at:new Date().toISOString(),controls:['Use microphone and camera'],capture_note:'Controlled screenshot fixture'}:undefined,summary:'{"overview":"We agreed to ship the fix."}',transcript:[{speaker:'unknown',text:'Ship the fix',at:'fixture'}]}});
   });
   await page.goto(url);await page.getByRole('heading',{name:'Cloud Meet attendance · beta',exact:true}).waitFor();
   await page.getByRole('button',{name:'Run Meet checks',exact:true}).click();
@@ -47,6 +47,9 @@ async function main(){
   await page.getByRole('button',{name:'Refresh cloud status',exact:true}).click();
   await page.getByText('Notes: No notes — assistant did not join',{exact:true}).waitFor();
   await page.getByText('Media checks: mic muted confirmed off; camera off not confirmed off',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'View notes',exact:true}).click();
+  await page.getByText('Failed pre-join screen · private diagnostic',{exact:true}).waitFor();
+  await page.getByText('Controlled screenshot fixture',{exact:true}).waitFor();
   console.log('PASS: cloud readiness, Calendar/consent gates, enable/pause/stop, notes, summary retry, deletion, mobile');
  }finally{if(browser)await browser.close();if(server){try{process.kill(-server.pid,'SIGTERM');}catch{}server.stdout.destroy();server.stderr.destroy();server.unref();}fs.rmSync(harness,{recursive:true,force:true});fs.rmSync(path.join(web,'.next','types','app','cloud-meet-harness'),{recursive:true,force:true});}
 }

@@ -98,3 +98,47 @@ def test_tooltip_label_is_supported():
 def test_unknown_or_unchanged_state_is_never_confirmed_off(html):
     clicks, notes = run_case(html, expected=False)
     assert clicks <= 1 and "mic_muted_not_confirmed_off" in notes
+
+
+def test_failed_prejoin_capture_masks_inputs_and_does_not_capture_login_pages():
+    async def run():
+        from playwright.async_api import async_playwright
+
+        config = json.loads(Path(os.environ["JIRAYA_CHROMIUM_CONFIG"]).read_text())
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                executable_path=config["executablePath"], args=config["args"], headless=True
+            )
+            try:
+                page = await browser.new_page()
+                await page.route(
+                    "https://meet.google.com/**",
+                    lambda route: route.fulfill(
+                        content_type="text/html",
+                        body='<input value="PRIVATE-INPUT"><button>Use microphone and camera</button><button aria-label="Google Account: private@example.test">Account</button>',
+                    ),
+                )
+                await page.goto("https://meet.google.com/abc-defg-hij")
+                joiner = CloudJoiner(
+                    audio=object(),
+                    settings=object(),
+                    on_turn=None,
+                    tick=None,
+                    leave_on_speech=False,
+                )
+                await joiner._media_failure(page, JoinEvidence(page.url))
+                assert joiner.failure_debug["screenshot_base64"]
+                assert joiner.failure_debug["controls"] == ["Use microphone and camera"]
+                assert "PRIVATE-INPUT" not in json.dumps(joiner.failure_debug)
+                assert "private@example.test" not in json.dumps(joiner.failure_debug)
+                joiner.failure_debug = None
+                await page.route(
+                    "https://accounts.google.com/**", lambda route: route.fulfill(body="Sign in")
+                )
+                await page.goto("https://accounts.google.com/v3/signin")
+                await joiner._media_failure(page, JoinEvidence(page.url))
+                assert joiner.failure_debug is None
+            finally:
+                await browser.close()
+
+    asyncio.run(run())

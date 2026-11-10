@@ -319,10 +319,14 @@ def test_cloud_browser_passes_no_provider_credentials_and_keeps_inbound_audio(
 
     options = {}
 
+    async def grant(permissions, **kwargs):
+        options["permissions"] = permissions
+        options["permission_origin"] = kwargs["origin"]
+
     class Chromium:
         async def launch_persistent_context(self, *args, **kwargs):
             options.update(kwargs)
-            return object()
+            return SimpleNamespace(grant_permissions=grant)
 
     engine = SimpleNamespace(chromium=Chromium())
 
@@ -346,6 +350,8 @@ def test_cloud_browser_passes_no_provider_credentials_and_keeps_inbound_audio(
     assert options["env"]["PULSE_SINK"] == "private_sink"
     assert "DATABASE_URL" not in options["env"] and "ASSEMBLYAI_API_KEY" not in options["env"]
     assert options["headless"] and options["locale"] == "en-US"
+    assert options["permissions"] == ["microphone", "camera"]
+    assert options["permission_origin"] == "https://meet.google.com"
 
 
 def test_live_capture_failure_leaves_and_marks_partial(cloud, monkeypatch):
@@ -728,7 +734,11 @@ def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(cloud,
         leave_reason = ""
 
         def __init__(self, **kwargs):
-            pass
+            self.failure_debug = {
+                "host": "meet.google.com",
+                "screenshot_base64": "PRIVATE-DIAGNOSTIC",
+                "controls": ["Use camera"],
+            }
 
         async def join(self, url):
             return JoinResult(
@@ -752,6 +762,8 @@ def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(cloud,
         row = db.get(CloudMeetSession, key)
         assert row.status == "FAILED" and row.summary_state == "DONE"
         assert not row.transcript_ciphertext
+        assert "PRIVATE-DIAGNOSTIC" not in json.dumps(row.details)
+        assert row.details["prejoin_debug_ciphertext"]
         assert row.details["summary_status"] == "NO_ATTENDANCE"
         assert not row.details["summary_requested"]
         assert row.details["media_checks"] == [
@@ -812,3 +824,26 @@ def test_explicit_summary_refresh_can_fetch_accessible_google_notes_after_failed
             row.details["summary_status"] == "READY"
             and row.details["summary_source"] == "google_meet"
         )
+
+
+def test_prejoin_debug_is_encrypted_and_only_in_owners_detail(cloud):
+    user, key, _ = cloud
+    with SessionLocal() as db:
+        row = db.get(CloudMeetSession, key)
+        row.details = {
+            "reason": "MEDIA_NOT_CONFIRMED_OFF",
+            "prejoin_debug_ciphertext": TokenCipher(get_settings().token_encryption_key).encrypt(
+                json.dumps({"screenshot_base64": "PRIVATE-SCREENSHOT"})
+            ),
+        }
+        db.commit()
+    with account_scope(user, user + "@example.test"), TestClient(app) as client:
+        listing = client.get("/meet/cloud/sessions")
+        assert "PRIVATE-SCREENSHOT" not in listing.text
+        assert "prejoin_debug_ciphertext" not in listing.text
+        detail = client.get("/meet/cloud/sessions/" + key)
+        assert detail.json()["prejoin_debug"]["screenshot_base64"] == "PRIVATE-SCREENSHOT"
+        assert "prejoin_debug_ciphertext" not in detail.text
+    with account_scope("other-debug-user", "other@example.test"), TestClient(app) as client:
+        assert client.get("/meet/cloud/sessions/" + key).status_code == 404
+        assert "PRIVATE-SCREENSHOT" not in client.get("/meet/cloud/sessions").text

@@ -1,11 +1,13 @@
 """One guest browser and one private audio sink per cloud worker session."""
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import re
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from app.meet_agent import selector_fallbacks as sf
 from app.meet_agent.joiner import FAKE_MEDIA_FLAGS, MeetJoiner
@@ -185,6 +187,7 @@ class CloudJoiner(MeetJoiner):
         self.tick = tick
         self.leave_on_speech = leave_on_speech
         self.leave_reason = ""
+        self.failure_debug = None
 
     async def _launch_context(self):
         from playwright.async_api import async_playwright
@@ -209,6 +212,12 @@ class CloudJoiner(MeetJoiner):
                     "--autoplay-policy=no-user-gesture-required",
                     "--lang=en-US",
                 ],
+            )
+            # Set permissions before Meet checks navigator.permissions. Chromium's
+            # fake-device flags alone do not explicitly configure the origin grant.
+            # Both virtual devices still have to be proven OFF before admission.
+            await context.grant_permissions(
+                ["microphone", "camera"], origin="https://meet.google.com"
             )
             return engine, context
         except Exception:
@@ -235,6 +244,40 @@ class CloudJoiner(MeetJoiner):
                 await field.fill("Jiraya · AI meeting notes")
                 break
         return await super()._toggle_media_off(page, selectors, label, evidence)
+
+    async def _media_failure(self, page, evidence):
+        """Capture only a failed pre-join screen, never an admitted call or login page."""
+        if urlsplit(page.url).scheme != "https" or urlsplit(page.url).hostname != "meet.google.com":
+            return
+        debug = {"captured_at": datetime.now(UTC).isoformat(), "host": "meet.google.com"}
+        try:
+            # Do not inspect or include input values, cookies, URLs or page HTML.
+            labels = await page.locator('button, [role="button"]').evaluate_all(
+                """elements => elements.filter(el => el.getBoundingClientRect().width && el.getBoundingClientRect().height)
+                .map(el => el.getAttribute('aria-label') || el.getAttribute('data-tooltip') || el.getAttribute('title') || el.innerText || '')
+                .filter(text => /microphone|camera|join|continue|allow|permission/i.test(text))
+                .slice(0, 30).map(text => text.slice(0, 160))"""
+            )
+            debug["controls"] = [
+                re.sub(
+                    r"https?://\S+", "[link]", re.sub(r"[\w.+-]+@[\w.-]+", "[email]", str(value))
+                )
+                for value in labels
+            ]
+            image = await page.screenshot(
+                type="jpeg",
+                quality=40,
+                scale="css",
+                timeout=5000,
+                mask=[page.locator("input"), page.locator('[aria-label*="Google Account" i]')],
+            )
+            if len(image) <= 256_000:
+                debug["screenshot_base64"] = base64.b64encode(image).decode("ascii")
+            else:
+                debug["capture_note"] = "Screenshot exceeded the diagnostic size limit."
+        except Exception:  # noqa: BLE001 - diagnostics must not override the blocked join
+            debug["capture_note"] = "The pre-join screen could not be fully captured."
+        self.failure_debug = debug
 
     async def _wait_in_call(self, context, evidence, remaining_ms):
         async def turn(row):

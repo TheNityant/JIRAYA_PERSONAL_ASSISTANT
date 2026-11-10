@@ -105,11 +105,18 @@ def pack(db, settings, row, *, include_content=False):
         "end": aware(row.ends_at).isoformat(),
         "status": row.status,
         "stop_requested": row.stop_requested,
-        "details": row.details,
+        "details": {
+            key: value for key, value in row.details.items() if key != "prejoin_debug_ciphertext"
+        },
+        "has_prejoin_debug": bool(row.details.get("prejoin_debug_ciphertext")),
         "has_transcript": bool(row.transcript_ciphertext),
     }
     if include_content:
         cipher = TokenCipher(settings.token_encryption_key)
+        if row.details.get("prejoin_debug_ciphertext"):
+            result["prejoin_debug"] = json.loads(
+                cipher.decrypt(row.details["prejoin_debug_ciphertext"])
+            )
         result["summary"] = cipher.decrypt(row.summary_ciphertext) if row.summary_ciphertext else ""
         result["transcript"] = (
             json.loads(cipher.decrypt(row.transcript_ciphertext))

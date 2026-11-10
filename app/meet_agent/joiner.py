@@ -173,6 +173,9 @@ class MeetJoiner:
         evidence.notes.append(f"{label}_not_confirmed_off")
         return False
 
+    async def _media_failure(self, page, evidence) -> None:
+        await evidence.snapshot(self.evidence_dir, "media_not_confirmed_off", page)
+
     async def check_session(self, page, *, navigate=True) -> bool:
         """Deterministic: is this profile's Google session alive right now?"""
         if navigate:
@@ -306,6 +309,7 @@ class MeetJoiner:
             mic_off = await self._toggle_media_off(page, sf.PREJOIN_MIC_MUTE_SELECTORS, "mic_muted", evidence)
             camera_off = await self._toggle_media_off(page, sf.PREJOIN_CAMERA_OFF_SELECTORS, "camera_off", evidence)
             if not mic_off or not camera_off:
+                await self._media_failure(page, evidence)
                 return await self._finish(pw, context, evidence, "FAILED", "MEDIA_NOT_CONFIRMED_OFF")
 
             # Step 4: wait for the pre-join control and click the fallback chain.

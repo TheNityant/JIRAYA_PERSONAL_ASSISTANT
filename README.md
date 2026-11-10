@@ -10,6 +10,10 @@ Agent -> Verifier -> Event Ledger -> Reconciliator
 
 The distinguishing mechanism is temporal outcome assurance: Jiraya records evidence that an action really succeeded, then later uses event history to distinguish an original execution failure from an outcome that was legitimately superseded or externally invalidated afterward.
 
+# Contributor
+JAY LOHAR
+NITYANT TIWARI
+
 ## Frontend account and connection flow (Phase 2e)
 
 Open the web app, create a Jiraya account or sign in, then choose **Connect Gmail**,

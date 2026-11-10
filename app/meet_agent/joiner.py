@@ -306,11 +306,15 @@ class MeetJoiner:
                 )
             except Exception:
                 pass  # OFF-state verification below still gates joining.
+            if await self._check_any_visible(page, sf.PREJOIN_ACCESS_DENIED_MARKERS):
+                await self._media_failure(page, evidence)
+                return await self._finish(pw, context, evidence, "FAILED", "GOOGLE_JOIN_REJECTED")
             mic_off = await self._toggle_media_off(page, sf.PREJOIN_MIC_MUTE_SELECTORS, "mic_muted", evidence)
             camera_off = await self._toggle_media_off(page, sf.PREJOIN_CAMERA_OFF_SELECTORS, "camera_off", evidence)
             if not mic_off or not camera_off:
                 await self._media_failure(page, evidence)
-                return await self._finish(pw, context, evidence, "FAILED", "MEDIA_NOT_CONFIRMED_OFF")
+                reason = "GOOGLE_JOIN_REJECTED" if await self._check_any_visible(page, sf.PREJOIN_ACCESS_DENIED_MARKERS) else "MEDIA_NOT_CONFIRMED_OFF"
+                return await self._finish(pw, context, evidence, "FAILED", reason)
 
             # Step 4: wait for the pre-join control and click the fallback chain.
             deadline = asyncio.get_event_loop().time() + self.join_timeout_seconds

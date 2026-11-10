@@ -119,3 +119,9 @@ def first_matching(selectors: tuple[str, ...], visible_texts: list[str]) -> str 
     instead queries the page directly with Playwright locators.
     """
     return selectors[0] if selectors else None
+
+
+PREJOIN_ACCESS_DENIED_MARKERS = (
+    "text=/you can[’']t join this video call/i",
+    "text=/you cannot join this video call/i",
+)

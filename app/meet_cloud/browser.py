@@ -210,7 +210,9 @@ class CloudJoiner(MeetJoiner):
             # Calendar links can select a different browser account with authuser.
             # Keep the canonical room, never transfer a local account index to AWS.
             parsed = urlsplit(meet_url)
-            meet_url = f"https://meet.google.com{parsed.path}"
+            room = parsed.path.rsplit("/", 1)[-1]
+            prefix = "/meet" if getattr(self.settings, "meet_cloud_identity_mode", "guest") == "guest" else ""
+            meet_url = f"https://meet.google.com{prefix}/{room}"
         return await super().join(meet_url)
 
     async def _launch_context(self):

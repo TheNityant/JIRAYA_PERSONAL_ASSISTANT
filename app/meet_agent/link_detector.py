@@ -16,7 +16,7 @@ def is_valid_meet_link(url: str) -> bool:
             and not parsed.username
             and not parsed.password
             and parsed.port in {None, 443}
-            and re.fullmatch(r"/[a-z]{3}-[a-z]{4}-[a-z]{3}", parsed.path, re.IGNORECASE)
+            and re.fullmatch(r"/(?:meet/)?[a-z]{3}-[a-z]{4}-[a-z]{3}", parsed.path, re.IGNORECASE)
             and not parsed.fragment
         )
     except (ValueError, TypeError):

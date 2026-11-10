@@ -79,4 +79,4 @@ def test_calendar_browser_account_index_is_not_forwarded_to_aws(monkeypatch):
         asyncio.run(instance.join("https://meet.google.com/abc-defg-hij?authuser=2&hs=122"))
         == "fixture"
     )
-    assert seen == ["https://meet.google.com/abc-defg-hij"]
+    assert seen == ["https://meet.google.com/meet/abc-defg-hij"]

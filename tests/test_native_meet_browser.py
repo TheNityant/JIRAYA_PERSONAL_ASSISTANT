@@ -134,3 +134,25 @@ def test_cloud_native_driver_sets_permissions_before_page_navigation(monkeypatch
     )
     assert asyncio.run(joiner._launch_context()) == (handle, context)
     assert grants == [(["microphone", "camera"], {"origin": "https://meet.google.com"})]
+
+
+def test_cleanup_reaps_process_that_exits_during_termination():
+    waited = []
+
+    class Process:
+        returncode = None
+
+        def terminate(self):
+            raise ProcessLookupError()
+
+        async def wait(self):
+            waited.append(True)
+            return 0
+
+    async def stop():
+        pass
+
+    handle = native.NativeHandle(SimpleNamespace(stop=stop))
+    handle.processes = [Process()]
+    asyncio.run(handle.stop())
+    assert waited == [True]

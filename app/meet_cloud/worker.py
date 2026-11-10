@@ -304,6 +304,7 @@ async def attend(key, worker_id, shutdown):
         joiner = None
         result = None
         reason = ""
+        runtime_error = None
 
         # Heartbeats/cancellation must continue during the browser's admission wait too.
         async def monitor():
@@ -347,7 +348,19 @@ async def attend(key, worker_id, shutdown):
                 result = await joiner.join(fresh["url"])
                 reason = joiner.leave_reason or result.reason
         except Exception as exc:  # noqa: BLE001 - isolate per-meeting provider failures
-            reason = "Cloud runtime unavailable: " + type(exc).__name__
+            runtime_error = {
+                "type": type(exc).__name__,
+                "errno": getattr(exc, "errno", None),
+                "stage": "temporary_cleanup" if result is not None else "browser_or_audio_runtime",
+            }
+            logger.warning(
+                "Cloud Meet runtime error: type=%s errno=%s stage=%s",
+                runtime_error["type"],
+                runtime_error["errno"],
+                runtime_error["stage"],
+            )
+            if result is None:
+                reason = "Cloud runtime unavailable: " + type(exc).__name__
         finally:
             monitor_task.cancel()
             await asyncio.gather(monitor_task, return_exceptions=True)
@@ -370,6 +383,7 @@ async def attend(key, worker_id, shutdown):
                     row.summary_state = "QUEUED" if admitted or turns else "DONE"
                     row.details = {
                         "reason": reason,
+                        "runtime_error": runtime_error,
                         "browser_result": {"status": result.status, "reason": result.reason}
                         if result
                         else None,

@@ -710,7 +710,10 @@ def test_cloud_diagnostics_redacts_calendar_errors(cloud, monkeypatch):
         assert "secret provider failure" not in response.text
 
 
-def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(cloud, monkeypatch):
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(
+    cloud, monkeypatch, cleanup_failure
+):
     from app.meet_agent.joiner import JoinEvidence, JoinResult
     from app.meet_cloud import worker
 
@@ -757,12 +760,34 @@ def test_failed_media_join_is_not_queued_for_notes_and_keeps_media_checks(cloud,
             )
 
     monkeypatch.setattr(worker, "CloudJoiner", Browser)
+    if cleanup_failure:
+        original = worker.tempfile.TemporaryDirectory
+
+        class Directory:
+            def __init__(self, **kwargs):
+                self.inner = original(**kwargs)
+
+            def __enter__(self):
+                return self.inner.__enter__()
+
+            def __exit__(self, *args):
+                self.inner.__exit__(*args)
+                raise OSError(39, "fixture cleanup error")
+
+        monkeypatch.setattr(worker.tempfile, "TemporaryDirectory", Directory)
     with account_scope(user, user + "@example.test"), SessionLocal() as db:
         assert claim(db, "fixture-worker") == key
     asyncio.run(worker.attend(key, "fixture-worker", asyncio.Event()))
     with SessionLocal() as db:
         row = db.get(CloudMeetSession, key)
         assert row.status == "FAILED" and row.summary_state == "DONE"
+        assert row.details["reason"] == "MEDIA_NOT_CONFIRMED_OFF"
+        if cleanup_failure:
+            assert row.details["runtime_error"] == {
+                "type": "OSError",
+                "errno": 39,
+                "stage": "temporary_cleanup",
+            }
         assert not row.transcript_ciphertext
         assert "PRIVATE-DIAGNOSTIC" not in json.dumps(row.details)
         assert row.details["prejoin_debug_ciphertext"]

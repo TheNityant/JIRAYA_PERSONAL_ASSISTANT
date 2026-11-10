@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import signal
 import socket
 from pathlib import Path
 
@@ -38,13 +39,24 @@ class NativeHandle:
             await self.engine.stop()
         finally:
             for process in reversed(self.processes):
-                if process.returncode is None:
-                    process.terminate()
+                try:
+                    if getattr(process, "pid", None):
+                        os.killpg(process.pid, signal.SIGTERM)
+                    elif process.returncode is None:
+                        process.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), 5)
+                except TimeoutError:
                     try:
-                        await asyncio.wait_for(process.wait(), 5)
-                    except TimeoutError:
-                        process.kill()
-                        await process.wait()
+                        if getattr(process, "pid", None):
+                            os.killpg(process.pid, signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
 
 
 async def launch(engine, profile_dir, audio_name):
@@ -58,6 +70,7 @@ async def launch(engine, profile_dir, audio_name):
             "1280x800x24",
             "-nolisten",
             "tcp",
+            start_new_session=True,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -94,6 +107,7 @@ async def launch(engine, profile_dir, audio_name):
             "--autoplay-policy=no-user-gesture-required",
             "about:blank",
             env=env,
+            start_new_session=True,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

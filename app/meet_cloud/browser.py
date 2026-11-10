@@ -180,9 +180,19 @@ async def listen(settings, audio, on_turn):
 
 class CloudJoiner(MeetJoiner):
     def __init__(
-        self, *, audio, settings, on_turn, tick, leave_on_speech, expected_account="", **kwargs
+        self,
+        *,
+        audio,
+        settings,
+        on_turn,
+        tick,
+        leave_on_speech,
+        expected_account="",
+        display_name="Jiraya",
+        **kwargs,
     ):
         super().__init__(headless=True, auth_grace_seconds=0, **kwargs)
+        self.display_name = display_name
         self.expected_account = expected_account
         self.audio = audio
         self.settings = settings
@@ -277,7 +287,7 @@ class CloudJoiner(MeetJoiner):
         ):
             field = page.locator(selector).first
             if await field.is_visible():
-                await field.fill("Jiraya · AI meeting notes")
+                await field.fill(self.display_name)
                 break
         return await super()._toggle_media_off(page, selectors, label, evidence)
 

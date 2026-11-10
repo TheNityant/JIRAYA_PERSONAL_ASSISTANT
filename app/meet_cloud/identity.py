@@ -77,6 +77,8 @@ def set_browser_status(db, user_id, account, state, *, notify=True):
 
 def identity_mode(db, settings):
     """The worker's configured mode wins over a stale API environment setting."""
+    if settings.meet_cloud_guest_only:
+        return "guest"
     heartbeat = RuntimeStateStore(db).get("cloud-meet-worker") or {}
     mode = heartbeat.get("identity_mode")
     return mode if mode in {"guest", "google_profile"} else settings.meet_cloud_identity_mode

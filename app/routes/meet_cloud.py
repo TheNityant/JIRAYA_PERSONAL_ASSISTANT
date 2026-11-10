@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
+from app.meet_cloud.guest import guest_name
 from app.meet_cloud.identity import browser_status, identity_mode
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, pack, pause
-from app.models import CloudMeetBrowserSetup, CloudMeetSession, CloudMeetSettings
+from app.models import CloudMeetBrowserSetup, CloudMeetSession, CloudMeetSettings, User
 from app.routes.meet import upcoming_meetings
 from app.security.tokens import TokenCipher
 from app.services.connection_store import ConnectionStore
@@ -36,12 +37,22 @@ def availability(db, settings):
         online = False
     return {
         "worker_last_seen": heartbeat.get("at"),
-        "browser_portal_available": bool(online and heartbeat.get("browser_portal")),
+        "browser_portal_available": bool(
+            not settings.meet_cloud_guest_only and online and heartbeat.get("browser_portal")
+        ),
         "configured": settings.meet_cloud_enabled
         and bool(settings.assemblyai_api_key)
         and bool(settings.token_encryption_key)
         and bool(settings.nebius_api_key),
-        "worker_online": online,
+        "worker_online": online
+        and (
+            not settings.meet_cloud_guest_only or heartbeat.get("identity_mode") in (None, "guest")
+        ),
+        "worker_update_required": bool(
+            online
+            and settings.meet_cloud_guest_only
+            and heartbeat.get("identity_mode") == "google_profile"
+        ),
     }
 
 
@@ -58,6 +69,7 @@ def status(db: Annotated[Session, Depends(get_db)]):
         "browser_connection": browser_status(
             db, settings.dev_user_id, connection.provider_account_id if connection else None
         ),
+        "guest_display_name": guest_name(db.get(User, settings.dev_user_id), connection),
         "enabled": bool(preference and preference.enabled),
         "preferences": preference.preferences if preference else {},
         "google_transcript_authorized": bool(connection and MEET_READ_SCOPE in connection.scopes),
@@ -122,7 +134,7 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
         "browser_connection": browser,
         "display_name": "Connected Google browser account"
         if mode == "google_profile"
-        else "Jiraya · AI meeting notes",
+        else guest_name(db.get(User, settings.dev_user_id), connection),
         "checks": checks,
         "calendar_status": feed["status"],
         "eligible_events": len(items),
@@ -132,7 +144,7 @@ def diagnostics(db: Annotated[Session, Depends(get_db)]):
         else None,
         "message": "The saved Google browser session is reused across meetings and restarts. Use the frontend Google meeting browser connection for setup or reconnection if Google invalidates the saved session. Calendar OAuth and worker heartbeat do not establish browser sign-in. Every join checks the account again; no guest fallback is used."
         if mode == "google_profile"
-        else "Cloud attendance uses an anonymous guest, not your Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
+        else "Cloud attendance uses your profile display name as a guest label, not a signed-in Google account. Sign-in-only meetings cannot be joined by this worker. Automatic attempts run from 30 seconds before start until 2 minutes after start; the host may need to admit the guest.",
     }
 
 
@@ -164,7 +176,7 @@ def configure(body: Preferences, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(409, "Connect Google Calendar first.")
     from app.meet_cloud.portal_store import ACTIVE_SETUP
 
-    if db.scalar(
+    if identity_mode(db, settings) == "google_profile" and db.scalar(
         select(CloudMeetBrowserSetup.id)
         .where(
             CloudMeetBrowserSetup.user_id == settings.dev_user_id,

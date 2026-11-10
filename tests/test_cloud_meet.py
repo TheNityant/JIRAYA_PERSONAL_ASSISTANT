@@ -33,6 +33,7 @@ def cloud(monkeypatch):
     monkeypatch.setenv("ASSEMBLYAI_API_KEY", "fixture-api-key")
     monkeypatch.setenv("NEBIUS_API_KEY", "fixture-model-key")
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("MEET_CLOUD_GUEST_ONLY", "false")
     get_base_settings.cache_clear()
     init_db()
     user_id = uuid4().hex
@@ -1106,3 +1107,54 @@ def test_reconnected_profile_retires_only_its_own_unread_alerts(cloud):
         assert len(alerts) == 1
         set_browser_status(db, user, "other@example.test", "CONNECTED")
         assert not NotificationStore(db).list_recent(user_id=user, unread_only=True)
+
+
+def test_guest_only_worker_ignores_saved_google_profile_and_uses_owner_name(cloud, monkeypatch):
+    from app.meet_agent.joiner import JoinEvidence, JoinResult
+    from app.meet_cloud import worker
+
+    user, key, event = cloud
+    settings = get_base_settings()
+    monkeypatch.setattr(settings, "meet_cloud_guest_only", True)
+    monkeypatch.setattr(settings, "meet_cloud_identity_mode", "google_profile")
+    seen = []
+
+    async def nop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(
+        worker, "AudioSink", lambda name: SimpleNamespace(name=name, setup=nop, close=nop)
+    )
+    monkeypatch.setattr(
+        worker,
+        "upcoming_meetings",
+        lambda db: {
+            "status": "READY",
+            "calendar_account": "fixture@example.test",
+            "items": [event],
+        },
+    )
+
+    class Browser:
+        leave_reason = ""
+
+        def __init__(self, **kwargs):
+            seen.append(kwargs)
+
+        async def join(self, url):
+            return JoinResult("FAILED", "GOOGLE_JOIN_REJECTED", JoinEvidence(url))
+
+    monkeypatch.setattr(worker, "CloudJoiner", Browser)
+    with SessionLocal() as db:
+        db.get(User, user).display_name = "Nityant Tiwari"
+        row = db.get(CloudMeetSession, key)
+        row.status = "STARTING"
+        row.worker_id = "guest-worker"
+        db.commit()
+    asyncio.run(worker.attend(key, "guest-worker", asyncio.Event()))
+    assert seen[0]["display_name"] == "Nityant Tiwari"
+    assert seen[0]["settings"].meet_cloud_identity_mode == "guest"
+    assert not seen[0]["settings"].meet_cloud_browser_portal_enabled
+    assert seen[0]["profile_dir"].startswith("/tmp/jiraya-meet-")
+    with SessionLocal() as db:
+        assert db.get(CloudMeetSession, key).details["reason"] == "GOOGLE_JOIN_REJECTED"

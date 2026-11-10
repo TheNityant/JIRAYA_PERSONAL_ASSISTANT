@@ -17,6 +17,7 @@ from app.config import get_base_settings, get_settings
 from app.db import SessionLocal, init_db
 from app.meet_agent.verifier import verify_join
 from app.meet_cloud.browser import AudioSink, CloudJoiner
+from app.meet_cloud.guest import effective_settings, guest_name
 from app.meet_cloud.identity import browser_status, set_browser_status
 from app.meet_cloud.profiles import profile_path
 from app.meet_cloud.store import ACTIVE, MEET_READ_SCOPE, aware, claim, claim_summary, enqueue
@@ -50,6 +51,7 @@ def heartbeat(worker_id, identity_mode="guest", browser_portal=False):
 
 
 def discover(settings):
+    settings = effective_settings(settings)
     with SessionLocal() as db:
         users = db.execute(
             select(User.id, User.email)
@@ -102,7 +104,7 @@ def make_summary(key):
     if not user:
         return
     with account_scope(user.id, user.email), SessionLocal() as db:
-        settings = get_settings()
+        settings = effective_settings(get_settings())
         row = db.get(CloudMeetSession, key)
         cipher = TokenCipher(settings.token_encryption_key)
         turns = (
@@ -191,7 +193,7 @@ async def attend(key, worker_id, shutdown):
     if not user:
         return
     with account_scope(user.id, user.email):
-        settings = get_settings()
+        settings = effective_settings(get_settings())
         cipher = TokenCipher(settings.token_encryption_key)
         turns = {}
         last_save = 0
@@ -273,6 +275,9 @@ async def attend(key, worker_id, shutdown):
                 datetime.now(UTC) + timedelta(minutes=settings.meet_cloud_max_minutes),
             )
             preferences = dict(preference.preferences)
+            attendance_name = guest_name(
+                user, ConnectionStore(db).get_active(user_id=user.id, provider="google_calendar")
+            )
             if settings.meet_cloud_identity_mode == "google_profile":
                 browser = browser_status(db, user.id, session.calendar_account)
                 if browser["state"] != "CONNECTED":
@@ -324,6 +329,7 @@ async def attend(key, worker_id, shutdown):
                     tick=tick,
                     leave_on_speech=preferences.get("leave_on_speech", True),
                     expected_account=session.calendar_account,
+                    display_name=attendance_name,
                     profile_dir=str(
                         profile_path(
                             settings.meet_cloud_profile_root, user.id, session.calendar_account
@@ -403,7 +409,11 @@ async def attend(key, worker_id, shutdown):
 
 
 async def preflight():
-    if get_base_settings().meet_cloud_browser_portal_enabled and not shutil.which("Xvfb"):
+    if (
+        not get_base_settings().meet_cloud_guest_only
+        and get_base_settings().meet_cloud_browser_portal_enabled
+        and not shutil.which("Xvfb")
+    ):
         raise RuntimeError("Use the updated Dockerfile.meet: frontend browser setup requires Xvfb.")
     if not all(shutil.which(command) for command in ("pactl", "ffmpeg")):
         raise RuntimeError("Use Dockerfile.meet: the cloud worker requires PulseAudio and FFmpeg.")
@@ -426,6 +436,7 @@ async def preflight():
 
 
 async def serve(settings, shutdown=None):
+    settings = effective_settings(settings)
     if not settings.meet_cloud_enabled or not settings.assemblyai_api_key:
         raise RuntimeError(
             "Set MEET_CLOUD_ENABLED=true and ASSEMBLYAI_API_KEY on the dedicated cloud Meet worker."

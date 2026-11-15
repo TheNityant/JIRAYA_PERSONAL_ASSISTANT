@@ -154,14 +154,50 @@ def test_role_invitation_shared_decisions_and_demo_send_never_contacts_gmail(aut
         assert assistant.get("/email-workspace/watches").status_code == 409
 
 
-def test_role_picker_cannot_grant_assistant_access(auth):
-    with TestClient(app) as browser:
+def test_same_credentials_switch_views_without_cross_account_access(auth):
+    assistant_view = {**ORIGIN, "X-Jiraya-Workspace-Mode": "ASSISTANT"}
+    with TestClient(app) as browser, TestClient(app) as stranger:
         user = register(browser, "CLIENT")
+        register(stranger, "CLIENT")
+        stranger.post("/email-workspace/demo", headers=ORIGIN)
+        foreign_id = stranger.get("/email-workspace").json()["items"][0]["id"]
+        browser.post("/email-workspace/demo", headers=ORIGIN)
+        assert len(browser.get("/email-workspace").json()["items"]) == 2
+        browser.post("/auth/logout", headers=ORIGIN)
+        accepted = browser.post(
+            "/auth/login",
+            headers=ORIGIN,
+            json={"email": user["email"], "password": PASSWORD, "role": "ASSISTANT"},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["user"]["role"] == "CLIENT"
+        full = browser.get("/email-workspace", headers=assistant_view).json()
+        assert full["role"] == "ASSISTANT" and full["linked"] is True
+        assert len(full["items"]) == 5
+        assert len(browser.get("/email-workspace").json()["items"]) == 2
+        assert (
+            browser.get(f"/email-workspace/{foreign_id}", headers=assistant_view).status_code == 404
+        )
+        routine = next(
+            item for item in full["items"] if item["responsibility"] == "ASSISTANT_TO_REPLY"
+        )
+        changed = browser.patch(
+            f"/email-workspace/{routine['id']}",
+            headers=assistant_view,
+            json={"responsibility": "CLIENT_TO_REPLY"},
+        )
+        assert changed.status_code == 200
+        assert len(browser.get("/email-workspace").json()["items"]) == 3
+
+
+def test_delegated_assistant_cannot_claim_client_role(auth):
+    with TestClient(app) as browser:
+        user = register(browser, "ASSISTANT")
         browser.post("/auth/logout", headers=ORIGIN)
         denied = browser.post(
             "/auth/login",
             headers=ORIGIN,
-            json={"email": user["email"], "password": PASSWORD, "role": "ASSISTANT"},
+            json={"email": user["email"], "password": PASSWORD, "role": "CLIENT"},
         )
         assert denied.status_code == 403
         assert browser.get("/email-workspace").status_code == 401

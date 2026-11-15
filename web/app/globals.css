@@ -337,6 +337,8 @@ button { cursor: pointer; }
 .account-card p { color: var(--muted); line-height: 1.6; }
 .account-card form { display: grid; gap: 18px; margin: 24px 0 14px; }
 .account-card input { width: 100%; box-sizing: border-box; }
+.account-card .email-delegate-choice { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; }
+.account-card .email-delegate-choice input { width: auto; flex: none; margin-top: 4px; }
 .account-card .primary-button { margin-top: 12px; }
 .account-error { color: #f0a1a1 !important; padding: 8px 16px; }
 .account-bar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 24px; background: #11151a; border-bottom: 1px solid var(--border); }

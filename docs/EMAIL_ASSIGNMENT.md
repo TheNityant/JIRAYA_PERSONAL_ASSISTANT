@@ -1,20 +1,24 @@
 # Shared email workspace (assessment branch)
 
 The email workspace is an additive experience. Existing Jiraya automations, Calendar,
-GitHub, Meet and their deployed settings remain unchanged. The client owns the Gmail
-OAuth connection; a human assistant gets access only after the client creates a
-single-use, 24-hour invitation and the assistant accepts it. The client may revoke
-all assistant access from the email workspace. Existing Jiraya accounts migrate to
-the client role by default.
+GitHub, Meet and their deployed settings remain unchanged. The same account owner
+can sign in with the same email and password as Client or Assistant, or switch views
+after signing in. This view choice only exposes different controls over that owner's
+own inbox; it never grants access to another person's mailbox. To work for a
+different client, a separately registered delegated assistant still needs a
+single-use, 24-hour invitation. The client may revoke that access. Existing Jiraya
+accounts migrate to the client account type by default.
 
 ## Reviewer walkthrough
 
 1. Register a **Client** account and open Email workspace. Click **Try sample inbox**.
    This creates five clearly marked sample conversations, without contacting Gmail.
-2. In the client view, create an assistant invitation and copy its code privately.
-3. Register a separate **Assistant** account in another browser profile. Accept the
-   code. The assistant now sees all five conversations; the client sees only the two
-   requiring client attention.
+2. Switch to **Assistant view** without changing credentials. The assistant view sees
+   all five conversations; the client view sees only the two requiring attention.
+   You can also sign in with the same credentials in another browser profile and
+   select Assistant there.
+3. For a real second person, create an invitation in Client view. Register a separate
+   delegated assistant account using the sign-up checkbox, and accept the code.
 4. Open a routine scheduling conversation. Change its responsibility to **Client to
    reply**. Refresh the client view: it appears there immediately. On the client
    view, choose **Ask my assistant to take over**; it disappears from the client's

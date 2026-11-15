@@ -72,8 +72,8 @@ function notificationLabel(category: string): string {
   switch (category) {
     case "ACTION_REQUIRED": return "Needs you";
     case "AUTOMATION_EXECUTED": return "Done by Jiraya";
-    case "INFORMATION": return "FYI";
-    case "STATE_CHANGED": return "State changed";
+    case "INFORMATION": return "Updates";
+    case "STATE_CHANGED": return "Updates";
     default: return nice(category);
   }
 }
@@ -435,7 +435,9 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
     ["AWAITING_APPROVAL", "BLOCKED_BY_POLICY"].includes(execution.status);
 
   const filteredNotifications = notifications.filter(
-    (item) => notificationFilter === "ALL" || item.category === notificationFilter,
+    (item) => notificationFilter === "ALL" || (notificationFilter === "UPDATES"
+      ? ["INFORMATION","STATE_CHANGED"].includes(item.category)
+      : item.category === notificationFilter),
   );
   const filteredObligations = obligations.filter((item) =>
     obligationFilter === "OPEN" ? item.status === "OPEN" : item.status !== "OPEN",
@@ -674,16 +676,16 @@ export default function AutomationBuilder({accountId = "local"}: {accountId?: st
         <section className={`operations-page ${["GITHUB", "CALENDAR"].includes(activeView) ? "service-page" : ""}`}>
           {activeView === "GITHUB" ? <GitHubWorkspace accountId={accountId} onCreateAutomation={(repository, trigger) => beginAutomation("github", repository, trigger)} /> : activeView === "CALENDAR" ? <CalendarWorkspace onCreateAutomation={() => beginAutomation("google_calendar")} /> : activeView === "NOTIFICATIONS" ? (
             <>
-              <header className="operations-header"><div><span className="eyebrow">Notification center</span><h1>What Jiraya noticed and did</h1><p>“Needs you” means you have work to review. “Done by Jiraya” is a completed automatic action. FYI is informational. State changes explain obligation lifecycle updates.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
+              <header className="operations-header"><div><span className="eyebrow">Activity</span><h1>Your updates</h1><p>Review requests, completed actions and changes across your connected services. Open Email workspace to respond to conversations.</p></div><span className="unread-summary">{unreadCount} unread</span></header>
               <div className="filter-tabs">
-                {["ALL", "ACTION_REQUIRED", "AUTOMATION_EXECUTED", "INFORMATION", "STATE_CHANGED"].map((filter) => <button key={filter} className={notificationFilter === filter ? "active" : ""} onClick={() => setNotificationFilter(filter)}>{filter === "ALL" ? "All" : notificationLabel(filter)}</button>)}
+                {["ALL", "ACTION_REQUIRED", "AUTOMATION_EXECUTED", "UPDATES"].map((filter) => <button key={filter} className={notificationFilter === filter ? "active" : ""} onClick={() => setNotificationFilter(filter)}>{filter === "ALL" ? "All" : filter === "UPDATES" ? "Updates" : notificationLabel(filter)}</button>)}
               </div>
               <div className="operations-list">
                 {filteredNotifications.map((item) => (
                   <button className={`notification-card ${item.read_at ? "read" : "unread"} severity-${item.severity.toLowerCase()}`} key={item.id} onClick={() => markRead(item)}>
                     <div className="notification-card-top"><span className="notification-category">{notificationIcon(item.category)} · {notificationLabel(item.category)}</span><span>{when(item.created_at)}</span></div>
                     <strong>{item.title}</strong><p>{item.message}</p>
-                    <div className="notification-meta"><span>{nice(item.source)}</span>{item.obligation_id && <span>Obligation linked</span>}{!item.read_at && <span>Unread</span>}</div>
+                    <div className="notification-meta"><span>{nice(item.source)}</span>{item.obligation_id && <span>Follow-up linked</span>}{!item.read_at && <span>Unread</span>}{item.source==="gmail"&&<span>Open Email workspace to respond</span>}</div>
                   </button>
                 ))}
                 {!filteredNotifications.length && <div className="empty-state"><strong>No notifications here.</strong><span>Background automation events will appear automatically.</span></div>}

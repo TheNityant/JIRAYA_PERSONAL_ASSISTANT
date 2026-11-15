@@ -14,6 +14,7 @@ from app.routes import (
     connections,
     developer_briefing,
     events,
+    email_workspace,
     github,
     gmail,
     gmail_runtime,
@@ -67,6 +68,7 @@ app.include_router(auth.router)
 app.include_router(ai.router)
 app.include_router(events.router)
 app.include_router(gmail.router)
+app.include_router(email_workspace.router)
 app.include_router(gmail_runtime.router)
 app.include_router(calendar.router)
 app.include_router(github.router)

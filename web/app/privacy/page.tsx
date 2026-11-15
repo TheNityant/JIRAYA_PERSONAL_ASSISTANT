@@ -20,6 +20,7 @@ export default function PrivacyPage() {
 
     <h2>How information is used</h2>
     <p>We use this information to authenticate you, maintain account-specific connections, evaluate your configured conditions, execute authorized actions, check outcomes and troubleshoot failures. Enabled background automations can continue while you are signed out or the website is closed, provided the relevant backend is running and authorization remains valid. Signing out does not disable saved automations.</p>
+    <p>If you explicitly invite a human assistant through the email workspace, that assistant can read your shared Gmail conversations in Jiraya, review AI summaries, manage Gmail watches, draft replies and, after a deliberate send action, reply from your connected Gmail account. A watch configured for automatic replies can also send according to its saved conditions. Invitation codes expire after 24 hours and can be used once. You can revoke linked assistant access in the email workspace. Demo conversations are sample data and demo replies do not contact Gmail.</p>
 
     <h2>AI processing and service providers</h2>
     <p>Jiraya uses Nebius Token Factory for AI inference. When an AI-based automation runs, relevant message content, your instructions and task context may be sent to that service to interpret the request or generate a response. Do not enable these automations for information you are not permitted to share with the configured AI provider.</p>

@@ -180,49 +180,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     display_name: Mapped[str] = mapped_column(String(255), default="Local user")
-    role: Mapped[str] = mapped_column(String(20), default="CLIENT", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
-
-
-class AssistantAccess(Base):
-    """A client's explicit grant to one human assistant."""
-
-    __tablename__ = "assistant_access"
-    __table_args__ = (UniqueConstraint("client_id", "assistant_id"),)
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    client_id: Mapped[str] = mapped_column(String(64), index=True)
-    assistant_id: Mapped[str] = mapped_column(String(64), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-
-class EmailConversation(Owned, Base):
-    """One owner-scoped responsibility decision for one Gmail or sample thread."""
-
-    __tablename__ = "email_conversations"
-    __table_args__ = (UniqueConstraint("user_id", "external_thread_id"),)
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    external_thread_id: Mapped[str] = mapped_column(String(255), index=True)
-    source: Mapped[str] = mapped_column(String(20), default="DEMO")
-    subject: Mapped[str] = mapped_column(String(255))
-    sender: Mapped[str] = mapped_column(String(320))
-    last_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    messages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    responsibility: Mapped[str] = mapped_column(String(30), index=True)
-    suggested_responsibility: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    confidence: Mapped[float] = mapped_column(default=0.0)
-    reason: Mapped[str] = mapped_column(String(1000), default="")
-    summary: Mapped[str] = mapped_column(String(1500), default="")
-    manual_override: Mapped[bool] = mapped_column(Boolean, default=False)
-    review_required: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[str] = mapped_column(String(20), default="OPEN")
-    important: Mapped[bool] = mapped_column(Boolean, default=False)
-    unread: Mapped[bool] = mapped_column(Boolean, default=True)
-    draft_body: Mapped[str] = mapped_column(Text, default="")
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
 class Connection(Base):

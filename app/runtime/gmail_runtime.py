@@ -273,14 +273,6 @@ class GmailRuntimeService:
         # Self-addressed mail has both labels. It may trigger independent actions,
         # but never an automatic reply back to the same mailbox.
         incoming = not sent or "INBOX" in message.labels
-        if incoming and not sent and "INBOX" in message.labels:
-            # This is independent of watch execution. A triage failure must never prevent
-            # the existing email automation or temporal reconciliation from running.
-            try:
-                from app.services.email_workspace import ingest_message
-                ingest_message(self.db, self.settings, message)
-            except Exception:
-                self.db.rollback()
         action = self.actions.latest_verified_for_thread(message.thread_id)
         if action is not None and message.id != (action.context or {}).get("source_message_id"):
             batch = self._reconcile_thread(action.id)

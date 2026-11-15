@@ -209,6 +209,14 @@ export type MeetBrowserSetup = {id:string;status:string;reason:string;expires_at
 export type MeetBrowserInput = {kind:"click"|"text"|"key"|"scroll";x?:number;y?:number;text?:string;key?:string;delta?:number};
 
 export const api = {
+  emailBackendReady: async () => {
+    try {
+      const response = await fetch(`${API_BASE}/openapi.json`, {cache: "no-store", credentials: "include"});
+      if (!response.ok) return false;
+      const description = await response.json();
+      return Boolean(description?.paths?.["/email-workspace"]?.get && description?.components?.schemas?.Registration?.properties?.role);
+    } catch { return false; }
+  },
   startMeetBrowser: () => request<MeetBrowserSetup>("/meet/cloud/browser/sessions", {method:"POST",body:JSON.stringify({consent:true})}),
   meetBrowser: (id:string) => request<MeetBrowserSetup>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}`),
   meetBrowserInput: (id:string, sequence:number, events:MeetBrowserInput[]) => request<{accepted:boolean;next_sequence:number}>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}/input`,{method:"POST",body:JSON.stringify({sequence,events})}),

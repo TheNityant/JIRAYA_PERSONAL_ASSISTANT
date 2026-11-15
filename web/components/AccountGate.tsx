@@ -11,6 +11,7 @@ export default function AccountGate() {
   const [signup, setSignup] = useState(false);
   const [role, setRole] = useState<"CLIENT" | "ASSISTANT">("CLIENT");
   const [workspace, setWorkspace] = useState<"EMAIL" | "AUTOMATIONS">("EMAIL");
+  const [emailReady, setEmailReady] = useState(true);
   const [attention, setAttention] = useState<{id:string;subject:string}|null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -31,6 +32,13 @@ export default function AccountGate() {
       }
       setError("");
       if (state.user || !state.auth_required) {
+        if (state.user && !state.user.role) {
+          setEmailReady(false);
+          setWorkspace("AUTOMATIONS");
+          setError("The email workspace and assistant accounts need the matching backend deployment. Your existing Jiraya services are still available.");
+        } else {
+          setEmailReady(true);
+        }
         if (state.user?.role === "ASSISTANT") {
           setOnboarding(false);
           setConnections([]);
@@ -76,6 +84,10 @@ export default function AccountGate() {
     event.preventDefault(); if (busy) return;
     setBusy(true); setError("");
     try {
+      if (signup || role === "ASSISTANT") {
+        const ready = await api.emailBackendReady();
+        if (!ready) throw new Error("The email workspace backend has not been deployed yet. Assistant sign-in and new role-based accounts are unavailable until the API matches this frontend.");
+      }
       if (signup) await api.register(name, email, password, role);
       else await api.login(email, password, role);
       setPassword(""); await refresh(true);
@@ -95,10 +107,10 @@ export default function AccountGate() {
   if (!account) return <main className="account-shell"><section className="account-card"><h1>Jiraya</h1><p>{error || "Opening your workspace…"}</p>{error && <button onClick={() => refresh()}>Try again</button>}</section></main>;
   if (account.auth_required && !account.user) return <main className="account-shell"><section className="account-card">
     <span className="eyebrow">Jiraya · Shared inbox</span><h1>{signup ? "Create your account" : "Welcome back"}</h1>
-    <p>{role==="CLIENT"?"Connect your Gmail and review decisions passed to you.":"Manage a client's inbox after they invite you."}</p>
+    <p>{role==="CLIENT"?"Connect your Gmail and review decisions passed to you.":"Use a separate assistant account. Your client invites this account to manage their inbox."}</p>
     <div className="email-role-options" aria-label="Choose your role">
-      <button type="button" className={role==="CLIENT"?"active":""} onClick={()=>setRole("CLIENT")}>I am a client</button>
-      <button type="button" className={role==="ASSISTANT"?"active":""} onClick={()=>setRole("ASSISTANT")}>I am an assistant</button>
+      <button type="button" className={role==="CLIENT"?"active":""} onClick={()=>setRole("CLIENT")}>Sign in as client</button>
+      <button type="button" className={role==="ASSISTANT"?"active":""} onClick={()=>setRole("ASSISTANT")}>Sign in as assistant</button>
     </div>
     <form onSubmit={authenticate}>
       {signup && <label>Your name<input required maxLength={255} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)}/></label>}
@@ -112,7 +124,7 @@ export default function AccountGate() {
     {account.registration_enabled && <button className="ghost-button" disabled={busy} onClick={() => {setSignup(!signup); setError("");}}>{signup ? "Already have an account? Sign in" : "New to Jiraya? Create account"}</button>}
   </section></main>;
   return <>
-    <div className="account-bar"><span>{account.user?.display_name || "Local workspace"} · {account.user?.role==="ASSISTANT"?"Assistant":"Client"}</span>{account.user?.role!=="ASSISTANT"&&workspace==="AUTOMATIONS"&&<FirstTimeGuide key={account.user?.id || "local"} accountId={account.user?.id || "local"} connections={connections || []} onWorkspace={()=>setOnboarding(false)}/>}<div className="account-bar-actions"><button onClick={()=>setWorkspace("EMAIL")}>Email workspace</button>{account.user?.role!=="ASSISTANT"&&<button onClick={()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}>Jiraya services</button>}{account.user && <button disabled={busy} onClick={async () => {setBusy(true); try {await api.logout(); setConnections(null); setAccount({...account, user: null});} catch (e: any) {setError(e.message);} finally {setBusy(false);}}}>Sign out</button>}</div></div>
+    <div className="account-bar"><span>{account.user?.display_name || "Local workspace"} · {account.user?.role==="ASSISTANT"?"Assistant":account.user?.role==="CLIENT"?"Client":"Backend update pending"}</span>{account.user?.role!=="ASSISTANT"&&workspace==="AUTOMATIONS"&&<FirstTimeGuide key={account.user?.id || "local"} accountId={account.user?.id || "local"} connections={connections || []} onWorkspace={()=>setOnboarding(false)}/>}<div className="account-bar-actions">{emailReady&&<button onClick={()=>setWorkspace("EMAIL")}>Email workspace</button>}{account.user?.role!=="ASSISTANT"&&<button onClick={()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}>Jiraya services</button>}{account.user && <button disabled={busy} onClick={async () => {setBusy(true); try {await api.logout(); setConnections(null); setAccount({...account, user: null});} catch (e: any) {setError(e.message);} finally {setBusy(false);}}}>Sign out</button>}</div></div>
     {error && <p role="alert" className="account-error">{error}</p>}
     {attention && workspace==="AUTOMATIONS"&&<div className="email-toast" role="status"><div><strong>Email needs attention</strong><span>{attention.subject}</span></div><button onClick={()=>{setAttention(null);setWorkspace("EMAIL");}}>Open email</button><button aria-label="Dismiss email alert" onClick={()=>{sessionStorage.setItem(`jiraya.alert:${attention.id}`,"dismissed");setAttention(null);}}>×</button></div>}
     {workspace==="EMAIL" ? <EmailWorkspace role={account.user?.role || "CLIENT"} onLegacy={account.user?.role==="ASSISTANT"?undefined:()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}/> : onboarding && connections && account.auth_required ? <main className="account-shell"><section className="account-card setup-card">

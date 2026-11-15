@@ -169,12 +169,14 @@ export type GmailRuntimeStatus = {
 export const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const assistantView = typeof window !== "undefined" && path.startsWith("/email-workspace") && sessionStorage.getItem("jiraya.workspace_mode") === "ASSISTANT";
   const response = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     credentials: "include",
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(assistantView ? {"X-Jiraya-Workspace-Mode": "ASSISTANT"} : {}),
       ...(init?.headers ?? {}),
     },
   });

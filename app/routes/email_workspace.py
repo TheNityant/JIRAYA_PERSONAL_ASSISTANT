@@ -1,4 +1,4 @@
-"""Role-scoped human assistant/client inbox; never grants access from a role picker alone."""
+"""Owner views and explicit grants for assistants working on another client's inbox."""
 
 import hashlib
 import secrets
@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update as sql_update
 from sqlalchemy.orm import Session
@@ -52,8 +52,8 @@ def _owner(db: Session) -> tuple[User, User]:
 
 @contextmanager
 def _owner_db(owner: User):
-    # Existing tenant filters protect the client's Gmail connection and conversation rows.
-    # Access is only entered after checking the explicit AssistantAccess grant above.
+    # Tenant filters protect the owner's Gmail connection and conversations.
+    # A delegated account reaches this scope only after its AssistantAccess grant.
     with account_scope(owner.id, owner.email), SessionLocal() as db:
         yield db
 
@@ -82,20 +82,29 @@ def _payload(row: EmailConversation, *, detail: bool = False) -> dict:
     return data
 
 
-def _row(db: Session, owner: User, actor: User, conversation_id: str) -> EmailConversation:
+def _workspace_role(actor: User, request: Request) -> str:
+    # Only a client can select Assistant for their own account. A delegated
+    # assistant's access to another mailbox still requires an explicit grant.
+    if actor.role == "CLIENT" and request.headers.get("x-jiraya-workspace-mode") == "ASSISTANT":
+        return "ASSISTANT"
+    return actor.role
+
+
+def _row(db: Session, owner: User, role: str, conversation_id: str) -> EmailConversation:
     row = db.get(EmailConversation, conversation_id)
     if (
         not row
         or row.user_id != owner.id
-        or (actor.role == "CLIENT" and row.responsibility != "CLIENT_TO_REPLY")
+        or (role == "CLIENT" and row.responsibility != "CLIENT_TO_REPLY")
     ):
         raise HTTPException(404, "Conversation not found.")
     return row
 
 
 @router.get("")
-def overview(db: Session = Depends(get_db)):
+def overview(request: Request, db: Session = Depends(get_db)):
     actor = _user(db)
+    role = _workspace_role(actor, request)
     if actor.role == "ASSISTANT":
         link = db.scalars(
             select(AssistantAccess).where(AssistantAccess.assistant_id == actor.id)
@@ -105,7 +114,7 @@ def overview(db: Session = Depends(get_db)):
     actor, owner = _owner(db)
     with _owner_db(owner) as work:
         statement = select(EmailConversation).where(EmailConversation.user_id == owner.id)
-        if actor.role == "CLIENT":
+        if role == "CLIENT":
             statement = statement.where(
                 EmailConversation.responsibility == "CLIENT_TO_REPLY",
                 EmailConversation.status == "OPEN",
@@ -114,7 +123,7 @@ def overview(db: Session = Depends(get_db)):
             statement.order_by(EmailConversation.updated_at.desc()).limit(100)
         ).all()
         return {
-            "role": actor.role,
+            "role": role,
             "linked": True,
             "client": {"display_name": owner.display_name, "email": owner.email},
             "items": [_payload(row) for row in rows],
@@ -360,21 +369,24 @@ def preview_watch(watch_id: str, data: WatchPreview, db: Session = Depends(get_d
 
 
 @router.get("/{conversation_id}")
-def detail(conversation_id: str, db: Session = Depends(get_db)):
+def detail(conversation_id: str, request: Request, db: Session = Depends(get_db)):
     actor, owner = _owner(db)
     with _owner_db(owner) as work:
-        return _payload(_row(work, owner, actor, conversation_id), detail=True)
+        return _payload(
+            _row(work, owner, _workspace_role(actor, request), conversation_id), detail=True
+        )
 
 
 @router.post("/{conversation_id}/classify")
-def classify(conversation_id: str, db: Session = Depends(get_db)):
+def classify(conversation_id: str, request: Request, db: Session = Depends(get_db)):
     actor, owner = _owner(db)
-    if actor.role != "ASSISTANT":
+    role = _workspace_role(actor, request)
+    if role != "ASSISTANT":
         raise HTTPException(403, "Only the assistant can recheck a classification.")
     with _owner_db(owner) as work:
         from app.services.email_workspace import decide
 
-        row = _row(work, owner, actor, conversation_id)
+        row = _row(work, owner, role, conversation_id)
         result = decide(get_settings(), row.messages)
         row.suggested_responsibility = result["classification"]
         row.summary = result["summary"] or row.summary
@@ -403,23 +415,26 @@ class UpdateRequest(BaseModel):
 
 
 @router.patch("/{conversation_id}")
-def update(conversation_id: str, data: UpdateRequest, db: Session = Depends(get_db)):
+def update(
+    conversation_id: str, data: UpdateRequest, request: Request, db: Session = Depends(get_db)
+):
     actor, owner = _owner(db)
+    role = _workspace_role(actor, request)
     with _owner_db(owner) as work:
-        row = _row(work, owner, actor, conversation_id)
-        if actor.role == "CLIENT" and (data.important is not None or data.draft_body is not None):
+        row = _row(work, owner, role, conversation_id)
+        if role == "CLIENT" and (data.important is not None or data.draft_body is not None):
             raise HTTPException(
                 403, "Only the assistant can edit this conversation's draft and importance."
             )
         if data.responsibility:
-            if actor.role == "CLIENT" and data.responsibility != "ASSISTANT_TO_REPLY":
+            if role == "CLIENT" and data.responsibility != "ASSISTANT_TO_REPLY":
                 raise HTTPException(403, "Clients can only delegate to their assistant.")
             row.responsibility = data.responsibility
             row.manual_override = True
             row.review_required = False
             row.reason = (
                 "Assigned by the client."
-                if actor.role == "CLIENT"
+                if role == "CLIENT"
                 else "Corrected by the human assistant."
             )
         if data.status is not None:
@@ -442,12 +457,13 @@ def update(conversation_id: str, data: UpdateRequest, db: Session = Depends(get_
 
 
 @router.post("/{conversation_id}/draft")
-def draft(conversation_id: str, db: Session = Depends(get_db)):
+def draft(conversation_id: str, request: Request, db: Session = Depends(get_db)):
     actor, owner = _owner(db)
-    if actor.role != "ASSISTANT":
+    role = _workspace_role(actor, request)
+    if role != "ASSISTANT":
         raise HTTPException(403, "The human assistant prepares and reviews drafts.")
     with _owner_db(owner) as work:
-        row = _row(work, owner, actor, conversation_id)
+        row = _row(work, owner, role, conversation_id)
         history = row.messages[-8:]
         prompt = (
             "Write a concise, professional reply for a human assistant to REVIEW. "
@@ -470,12 +486,13 @@ class SendRequest(BaseModel):
 
 
 @router.post("/{conversation_id}/send")
-def send(conversation_id: str, data: SendRequest, db: Session = Depends(get_db)):
+def send(conversation_id: str, data: SendRequest, request: Request, db: Session = Depends(get_db)):
     actor, owner = _owner(db)
-    if actor.role != "ASSISTANT":
-        raise HTTPException(403, "Only the linked assistant can send from the client's mailbox.")
+    role = _workspace_role(actor, request)
+    if role != "ASSISTANT":
+        raise HTTPException(403, "Use the assistant workspace to send a reviewed reply.")
     with _owner_db(owner) as work:
-        row = _row(work, owner, actor, conversation_id)
+        row = _row(work, owner, role, conversation_id)
         if row.status != "OPEN":
             raise HTTPException(409, "This conversation is already handled or a send needs review.")
         if row.source == "DEMO":

@@ -65,7 +65,12 @@ class LoginRequest(Credentials):
 
 
 def public_user(user):
-    return {"id": user.id, "email": user.email, "display_name": user.display_name, "role": user.role}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": user.role,
+    }
 
 
 def rate_limit(db, request):
@@ -129,7 +134,13 @@ def login(data: LoginRequest, request: Request, response: Response, db: Session 
     user = db.scalars(select(User).where(User.email == data.email)).first()
     if not password_matches(data.password, user.password_hash if user else None):
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
-    if data.role and user.role != data.role:
+    # An account owner can choose the assistant *view* of their own inbox.
+    # A delegated assistant still cannot become another client's owner by selecting Client.
+    if (
+        data.role
+        and user.role != data.role
+        and not (user.role == "CLIENT" and data.role == "ASSISTANT")
+    ):
         raise HTTPException(status_code=403, detail="This account uses the other sign-in option.")
     create_session(db, user, response, get_settings())
     return {"user": public_user(user)}

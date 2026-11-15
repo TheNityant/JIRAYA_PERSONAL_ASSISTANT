@@ -199,7 +199,7 @@ export type EmailConversation = {
   id: string; source: "DEMO" | "GMAIL"; subject: string; sender: string;
   responsibility: "ASSISTANT_TO_REPLY" | "CLIENT_TO_REPLY" | "NO_REPLY_NEEDED";
   suggested_responsibility: string | null; confidence: number; reason: string; summary: string;
-  manual_override: boolean; review_required: boolean; status: "OPEN" | "HANDLED" | "SENDING" | "SEND_UNCERTAIN";
+  manual_override: boolean; review_required: boolean; status: "OPEN" | "ON_HOLD" | "HANDLED" | "SENDING" | "SEND_UNCERTAIN";
   important: boolean; unread: boolean; updated_at: string; draft_body: string;
   messages?: Array<{id: string; from: string; subject: string; body: string; date: number}>;
 };

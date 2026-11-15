@@ -137,7 +137,7 @@ def test_role_invitation_shared_decisions_and_demo_send_never_contacts_gmail(aut
             client.post(
                 f"/email-workspace/{assistant_item['id']}/send", headers=ORIGIN, json={"body": "No"}
             ).status_code
-            == 403
+            == 404
         )
         sent = assistant.post(
             f"/email-workspace/{assistant_item['id']}/send",
@@ -190,6 +190,46 @@ def test_same_credentials_switch_views_without_cross_account_access(auth):
         assert len(browser.get("/email-workspace").json()["items"]) == 3
 
 
+def test_owner_can_reply_in_client_view_and_reset_samples_repeatedly(auth):
+    assistant_view = {**ORIGIN, "X-Jiraya-Workspace-Mode": "ASSISTANT"}
+    with TestClient(app) as browser:
+        register(browser, "CLIENT")
+        payload = {
+            "name": "Only alert on pricing",
+            "condition": "Client must approve pricing quotes",
+            "action": "NOTIFY",
+        }
+        assert browser.post("/email-workspace/watches", headers=ORIGIN, json=payload).status_code == 403
+        assert browser.post("/email-workspace/watches", headers=assistant_view, json=payload).status_code == 201
+        assert browser.post("/email-workspace/demo", headers=ORIGIN).json()["created"] == 5
+        row = browser.get("/email-workspace").json()["items"][0]
+        row_id = row["id"]
+        assert browser.patch(
+            f"/email-workspace/{row_id}", headers=ORIGIN, json={"draft_body": "My reply"}
+        ).status_code == 200
+        sent = browser.post(
+            f"/email-workspace/{row_id}/send", headers=ORIGIN, json={"body": "My reply"}
+        )
+        assert sent.status_code == 200 and sent.json()["simulated"] is True
+        assert browser.get(f"/email-workspace/{row_id}").status_code == 404
+        assert browser.post("/email-workspace/demo", headers=ORIGIN).json()["created"] == 0
+        restored = browser.get(f"/email-workspace/{row_id}").json()
+        assert restored["status"] == "OPEN" and restored["draft_body"] == ""
+        assert browser.patch(
+            f"/email-workspace/{row_id}", headers=assistant_view, json={"status": "ON_HOLD"}
+        ).status_code == 200
+        assert browser.patch(
+            f"/email-workspace/{row_id}", headers=ORIGIN, json={"status": "ON_HOLD"}
+        ).status_code == 404
+        assert browser.patch(
+            f"/email-workspace/{row_id}",
+            headers=assistant_view,
+            json={"status": "OPEN", "responsibility": "CLIENT_TO_REPLY"},
+        ).status_code == 200
+        assert browser.post("/email-workspace/demo", headers=ORIGIN).json()["created"] == 0
+        assert browser.get(f"/email-workspace/{row_id}").json()["status"] == "OPEN"
+
+
 def test_delegated_assistant_cannot_claim_client_role(auth):
     with TestClient(app) as browser:
         user = register(browser, "ASSISTANT")
@@ -216,8 +256,53 @@ def test_uncertain_send_cannot_be_reset_by_status_patch(auth):
             row.status = "SEND_UNCERTAIN"
             db.commit()
         response = client.patch(
-            f"/email-workspace/{row_id}", headers=ORIGIN, json={"status": "OPEN"}
+            f"/email-workspace/{row_id}",
+            headers={**ORIGIN, "X-Jiraya-Workspace-Mode": "ASSISTANT"},
+            json={"status": "OPEN"},
         )
         assert response.status_code == 409
         with SessionLocal() as db:
             assert db.get(EmailConversation, row_id).status == "SEND_UNCERTAIN"
+
+
+def test_live_reply_calls_gmail_once_and_only_then_marks_handled(auth, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.db import SessionLocal
+    from app.models import EmailConversation
+    from app.routes import email_workspace as route
+
+    calls = []
+    thread = [""]
+
+    class FakeGmail:
+        def get_message(self, message_id):
+            calls.append(("get", message_id))
+            return SimpleNamespace(thread_id=thread[0], sender="sender@example.test")
+
+        def send_reply(self, *, source, body_text):
+            calls.append(("send", body_text))
+            return {"id": "sent-1"}
+
+    monkeypatch.setattr(route, "get_settings", lambda: SimpleNamespace(enable_external_actions=True))
+    monkeypatch.setattr(route, "get_gmail_client", lambda *_: FakeGmail())
+    with TestClient(app) as browser:
+        register(browser, "CLIENT")
+        browser.post("/email-workspace/demo", headers=ORIGIN)
+        row_id = browser.get("/email-workspace").json()["items"][0]["id"]
+        with SessionLocal() as db:
+            row = db.get(EmailConversation, row_id)
+            thread[0] = row.external_thread_id
+            row.source = "GMAIL"
+            db.commit()
+        response = browser.post(
+            f"/email-workspace/{row_id}/send", headers=ORIGIN, json={"body": "Approved."}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["sent"] is True and response.json()["simulated"] is False
+        assert calls == [("get", thread[0]), ("send", "Approved.")]
+        assert browser.get(f"/email-workspace/{row_id}").status_code == 404
+        assert browser.post(
+            f"/email-workspace/{row_id}/send", headers=ORIGIN, json={"body": "Again"}
+        ).status_code == 404
+        assert len(calls) == 2

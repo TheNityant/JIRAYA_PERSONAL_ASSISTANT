@@ -160,12 +160,23 @@ def seed_demo(db: Session, owner_id: str) -> int:
     count = 0
     for index, (subject, sender, body, label, reason, summary) in enumerate(SAMPLES):
         thread_id = f"demo-{index}"
-        if db.scalars(
+        existing = db.scalars(
             select(EmailConversation).where(
                 EmailConversation.user_id == owner_id,
                 EmailConversation.external_thread_id == thread_id,
             )
-        ).first():
+        ).first()
+        if existing:
+            existing.responsibility = label
+            existing.suggested_responsibility = label
+            existing.reason = reason
+            existing.summary = summary
+            existing.status = "OPEN"
+            existing.draft_body = ""
+            existing.manual_override = False
+            existing.review_required = False
+            existing.unread = True
+            existing.updated_at = datetime.now(timezone.utc)
             continue
         db.add(
             EmailConversation(

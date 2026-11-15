@@ -95,7 +95,10 @@ def _row(db: Session, owner: User, role: str, conversation_id: str) -> EmailConv
     if (
         not row
         or row.user_id != owner.id
-        or (role == "CLIENT" and row.responsibility != "CLIENT_TO_REPLY")
+        or (
+            role == "CLIENT"
+            and (row.responsibility != "CLIENT_TO_REPLY" or row.status != "OPEN")
+        )
     ):
         raise HTTPException(404, "Conversation not found.")
     return row
@@ -274,8 +277,10 @@ class WatchRequest(BaseModel):
 
 
 @router.post("/watches", status_code=201)
-def create_watch(data: WatchRequest, db: Session = Depends(get_db)):
-    _, owner = _owner(db)
+def create_watch(data: WatchRequest, request: Request, db: Session = Depends(get_db)):
+    actor, owner = _owner(db)
+    if _workspace_role(actor, request) != "ASSISTANT":
+        raise HTTPException(403, "Switch to assistant view to configure Gmail watches.")
     if (
         data.action == "DRAFT_REPLY"
         and data.approval_policy == "AUTO"
@@ -300,8 +305,10 @@ def create_watch(data: WatchRequest, db: Session = Depends(get_db)):
 
 
 @router.patch("/watches/{watch_id}")
-def set_watch(watch_id: str, enabled: bool, db: Session = Depends(get_db)):
-    _, owner = _owner(db)
+def set_watch(watch_id: str, enabled: bool, request: Request, db: Session = Depends(get_db)):
+    actor, owner = _owner(db)
+    if _workspace_role(actor, request) != "ASSISTANT":
+        raise HTTPException(403, "Switch to assistant view to configure Gmail watches.")
     with _owner_db(owner) as work:
         store = AutomationStore(work)
         watch = store.get(watch_id)
@@ -317,8 +324,10 @@ class WatchPreview(BaseModel):
 
 
 @router.post("/watches/{watch_id}/preview")
-def preview_watch(watch_id: str, data: WatchPreview, db: Session = Depends(get_db)):
-    _, owner = _owner(db)
+def preview_watch(watch_id: str, data: WatchPreview, request: Request, db: Session = Depends(get_db)):
+    actor, owner = _owner(db)
+    if _workspace_role(actor, request) != "ASSISTANT":
+        raise HTTPException(403, "Switch to assistant view to test Gmail watches.")
     with _owner_db(owner) as work:
         watch = AutomationStore(work).get(watch_id)
         if not watch or watch.source != "gmail":
@@ -408,7 +417,7 @@ class UpdateRequest(BaseModel):
     responsibility: Literal["ASSISTANT_TO_REPLY", "CLIENT_TO_REPLY", "NO_REPLY_NEEDED"] | None = (
         None
     )
-    status: Literal["OPEN", "HANDLED"] | None = None
+    status: Literal["OPEN", "HANDLED", "ON_HOLD"] | None = None
     important: bool | None = None
     unread: bool | None = None
     draft_body: str | None = Field(default=None, max_length=20000)
@@ -422,10 +431,8 @@ def update(
     role = _workspace_role(actor, request)
     with _owner_db(owner) as work:
         row = _row(work, owner, role, conversation_id)
-        if role == "CLIENT" and (data.important is not None or data.draft_body is not None):
-            raise HTTPException(
-                403, "Only the assistant can edit this conversation's draft and importance."
-            )
+        if role == "CLIENT" and (data.important is not None or data.status == "ON_HOLD"):
+            raise HTTPException(403, "Only the assistant can mark important or put a thread on hold.")
         if data.responsibility:
             if role == "CLIENT" and data.responsibility != "ASSISTANT_TO_REPLY":
                 raise HTTPException(403, "Clients can only delegate to their assistant.")
@@ -489,8 +496,8 @@ class SendRequest(BaseModel):
 def send(conversation_id: str, data: SendRequest, request: Request, db: Session = Depends(get_db)):
     actor, owner = _owner(db)
     role = _workspace_role(actor, request)
-    if role != "ASSISTANT":
-        raise HTTPException(403, "Use the assistant workspace to send a reviewed reply.")
+    if role not in {"ASSISTANT", "CLIENT"}:
+        raise HTTPException(403, "Sign in to send a reviewed reply.")
     with _owner_db(owner) as work:
         row = _row(work, owner, role, conversation_id)
         if row.status != "OPEN":

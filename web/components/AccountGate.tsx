@@ -44,12 +44,7 @@ export default function AccountGate() {
           const chosen = sessionStorage.getItem("jiraya.workspace_mode");
           setViewRole(state.user?.role === "ASSISTANT" || chosen === "ASSISTANT" ? "ASSISTANT" : "CLIENT");
         }
-        if (state.user?.role === "ASSISTANT") {
-          setOnboarding(false);
-          setConnections([]);
-          setWorkspace("EMAIL");
-          return;
-        }
+        if (state.user?.role === "ASSISTANT") setWorkspace("EMAIL");
         const [result, savedRules] = await Promise.all([api.listConnections(), api.listAutomations()]);
         setConnections(result.catalog);
         setOnboarding(!savedRules.length && !result.catalog.some((item) => item.status === "CONNECTED"));
@@ -84,6 +79,8 @@ export default function AccountGate() {
     const timer=window.setInterval(()=>void check(),30000);
     return()=>{live=false;window.clearInterval(timer);};
   },[account?.user?.id,workspace,emailReady]);
+
+  useEffect(()=>{if(emailReady && viewRole==="CLIENT" && workspace==="AUTOMATIONS")setWorkspace("EMAIL");},[emailReady,viewRole,workspace]);
 
   async function authenticate(event: FormEvent) {
     event.preventDefault(); if (busy) return;
@@ -132,10 +129,10 @@ export default function AccountGate() {
     {account.registration_enabled && <button className="ghost-button" disabled={busy} onClick={() => {setSignup(!signup); setError("");}}>{signup ? "Already have an account? Sign in" : "New to Jiraya? Create account"}</button>}
   </section></main>;
   return <>
-    <div className="account-bar"><span>{account.user?.display_name || "Local workspace"} · {!account.user?.role?"Backend update pending":viewRole==="ASSISTANT"?"Assistant view":"Client view"}</span>{viewRole==="CLIENT"&&workspace==="AUTOMATIONS"&&<FirstTimeGuide key={account.user?.id || "local"} accountId={account.user?.id || "local"} connections={connections || []} onWorkspace={()=>setOnboarding(false)}/>}<div className="account-bar-actions">{emailReady&&account.user?.role==="CLIENT"&&<button onClick={()=>{const next=viewRole==="CLIENT"?"ASSISTANT":"CLIENT";sessionStorage.setItem("jiraya.workspace_mode",next);setViewRole(next);setWorkspace("EMAIL");}}>{viewRole==="CLIENT"?"Switch to assistant view":"Switch to client view"}</button>}{emailReady&&<button onClick={()=>setWorkspace("EMAIL")}>Email workspace</button>}{viewRole==="CLIENT"&&<button onClick={()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}>Jiraya services</button>}{account.user && <button disabled={busy} onClick={async () => {setBusy(true); try {await api.logout(); sessionStorage.removeItem("jiraya.workspace_mode"); setConnections(null); setAccount({...account, user: null});} catch (e: any) {setError(e.message);} finally {setBusy(false);}}}>Sign out</button>}</div></div>
+    <div className="account-bar"><span>{account.user?.display_name || "Local workspace"} · {!account.user?.role?"Backend update pending":viewRole==="ASSISTANT"?"Assistant view":"Client view"}</span>{viewRole==="ASSISTANT"&&workspace==="AUTOMATIONS"&&<FirstTimeGuide key={account.user?.id || "local"} accountId={account.user?.id || "local"} connections={connections || []} onWorkspace={()=>setOnboarding(false)}/>}<div className="account-bar-actions">{emailReady&&account.user?.role==="CLIENT"&&<button onClick={()=>{const next=viewRole==="CLIENT"?"ASSISTANT":"CLIENT";sessionStorage.setItem("jiraya.workspace_mode",next);setViewRole(next);setWorkspace("EMAIL");}}>{viewRole==="CLIENT"?"Switch to assistant view":"Switch to client view"}</button>}{emailReady&&<button onClick={()=>setWorkspace("EMAIL")}>Email workspace</button>}{viewRole==="ASSISTANT"&&<button onClick={()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}>Jiraya services</button>}{account.user && <button disabled={busy} onClick={async () => {setBusy(true); try {await api.logout(); sessionStorage.removeItem("jiraya.workspace_mode"); setConnections(null); setAccount({...account, user: null});} catch (e: any) {setError(e.message);} finally {setBusy(false);}}}>Sign out</button>}</div></div>
     {error && <p role="alert" className="account-error">{error}</p>}
     {attention && workspace==="AUTOMATIONS"&&<div className="email-toast" role="status"><div><strong>Email needs attention</strong><span>{attention.subject}</span></div><button onClick={()=>{setAttention(null);setWorkspace("EMAIL");}}>Open email</button><button aria-label="Dismiss email alert" onClick={()=>{sessionStorage.setItem(`jiraya.alert:${attention.id}`,"dismissed");setAttention(null);}}>×</button></div>}
-    {workspace==="EMAIL" ? <EmailWorkspace key={viewRole} role={viewRole} onLegacy={viewRole==="ASSISTANT"?undefined:()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}/> : onboarding && connections && account.auth_required ? <main className="account-shell"><section className="account-card setup-card">
+    {workspace==="EMAIL" || (emailReady && viewRole==="CLIENT") ? <EmailWorkspace key={viewRole} role={viewRole} onLegacy={viewRole==="CLIENT"?undefined:()=>{setWorkspace("AUTOMATIONS");setOnboarding(false);}}/> : onboarding && connections && account.auth_required ? <main className="account-shell"><section className="account-card setup-card">
       <span className="eyebrow">Set up your workspace</span><h1>Connect your accounts</h1><p>Choose a service and authorize Jiraya on its website. You can connect more accounts later.</p>
       {connections.map((item) => <article className="connection-card" key={item.id}><div className="connection-copy"><strong>{item.label}</strong><span>{item.status === "SETUP_REQUIRED" ? "This connection has not been enabled by the app owner yet." : item.account || item.description}</span></div><button disabled={busy || item.status !== "AVAILABLE"} onClick={() => connect(item)}>{item.status === "CONNECTED" ? "Connected" : item.status === "SETUP_REQUIRED" ? "Unavailable" : "Connect"}</button></article>)}
       <button className="primary-button" onClick={() => setOnboarding(false)}>Continue to workspace</button>

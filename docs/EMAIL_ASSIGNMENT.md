@@ -13,6 +13,7 @@ accounts migrate to the client account type by default.
 
 1. Register a **Client** account and open Email workspace. Click **Try sample inbox**.
    This creates five clearly marked sample conversations, without contacting Gmail.
+   **Reset sample inbox** restores the same five cases to open status any time.
 2. Switch to **Assistant view** without changing credentials. The assistant view sees
    all five conversations; the client view sees only the two requiring attention.
    You can also sign in with the same credentials in another browser profile and
@@ -21,11 +22,13 @@ accounts migrate to the client account type by default.
    delegated assistant account using the sign-up checkbox, and accept the code.
 4. Open a routine scheduling conversation. Change its responsibility to **Client to
    reply**. Refresh the client view: it appears there immediately. On the client
-   view, choose **Ask my assistant to take over**; it disappears from the client's
+   view, choose **Ask my personal assistant to take action**; it disappears from the client's
    attention list and returns to the assistant's.
 5. Open a conversation in the assistant view. **Suggest a draft** invokes Nebius if
    configured; the assistant can instead type one, save it, and use **Simulate reply**
-   to complete a sample conversation. No sample email is ever sent.
+   to complete a sample conversation. The assistant can send it to the client,
+   mark it done after work outside Jiraya, or put it on hold. The client can write
+   and simulate their own reply or delegate back. No sample email is ever sent.
 6. Create a notify-only or review-required Gmail watch under **Gmail watches**.
    **Test rule** takes sample sender/subject/body and evaluates the real matcher and
    action router without sending an email. A missing model key produces a clear
@@ -34,12 +37,16 @@ accounts migrate to the client account type by default.
 ## Live integration
 
 With a real client Gmail connection, **Sync Gmail** loads up to 15 recent inbox
-messages and classifies their threads. New incoming inbox mail is also classified
-by the existing background Gmail runtime while a human assistant is linked.
-The assistant can review or manually correct assignments and compose a reply.
+messages and classifies their threads. New incoming inbox mail is classified
+by the existing background Gmail runtime even when the owner uses both views
+without linking a separate assistant account. The assistant view has access to
+watch configuration and all conversations; the client view only exposes assigned
+open messages and Gmail connection. The assistant can review or manually correct
+assignments and compose a reply, and the client can compose a reply too.
 Sending a live reply requires a deliberate confirmation, the client's connection,
 the existing Gmail send scope, and ENABLE_EXTERNAL_ACTIONS. A send with an uncertain
 network result stays blocked for review to avoid automatic duplicate sends.
+Marking a thread done without sending requires confirmation and records no Gmail send.
 
 The three responsibility labels are distinct from an automation's action policy:
 notify-only does not imply no reply needed. A manual assignment is retained on a

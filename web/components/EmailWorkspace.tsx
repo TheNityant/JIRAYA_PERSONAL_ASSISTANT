@@ -82,8 +82,10 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
       <div><span className="email-eyebrow">JIRAYA / SHARED INBOX</span><h1>{role==="ASSISTANT"?"Assistant workspace":"Your attention"}</h1>
         <p>{role==="ASSISTANT" ? `Manage ${overview?.client?.display_name || "your client's"} conversations and review Jiraya's decisions.` : "Decisions and conversations your assistant has passed to you."}</p></div>
       <div className="email-header-actions">
-        {role==="CLIENT" && onLegacy && <button className="email-outline" onClick={onLegacy}>Connect Gmail / Jiraya services ↗</button>}
+        {role==="CLIENT" && <button className="email-outline" disabled={busy} onClick={()=>action(async()=>{const response=await api.startConnection("gmail");window.location.assign(response.authorization_url);},"Opening Gmail authorization…")}>Connect Gmail ↗</button>}
+        {role==="ASSISTANT" && onLegacy && <button className="email-outline" onClick={onLegacy}>Jiraya services ↗</button>}
         {overview?.linked && <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailSync(),"Inbox checked.")}>Sync Gmail</button>}
+        {overview?.linked && <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailSeedDemo(),"Sample conversations ready to try again.")}>Reset sample inbox</button>}
       </div>
     </header>
     {error && <div className="email-alert" role="alert">{error}</div>}
@@ -104,7 +106,7 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
         {invite && <code>{invite}</code>}
         <button className="email-outline" disabled={busy} onClick={()=>{if(window.confirm("Revoke all assistant access to your shared email workspace?"))void action(()=>api.emailRevoke(),"Assistant access revoked.");}}>Revoke assistant access</button>
       </details>}
-      <details className="email-watches">
+      {role==="ASSISTANT" && <details className="email-watches">
         <summary>Gmail watches <span>{watches.length} configured</span></summary>
         <p>Watches execute in the client's connected Gmail account. Notify-only never sends. An automatic reply may send under the conditions and instructions you set.</p>
         <div className="email-watch-grid">
@@ -127,7 +129,7 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
           {watchAction==="DRAFT_REPLY"&&<textarea aria-label="Reply instructions" placeholder="What may Jiraya say? Be specific for automatic replies." value={watchInstructions} onChange={e=>setWatchInstructions(e.target.value)} rows={2}/>}
           <button className="email-primary" disabled={busy}>Save watch</button>
         </form>
-      </details>
+      </details>}
       {activity.length>0&&<details className="email-watches email-activity"><summary>Recent Gmail activity <span>{activity.length} updates</span></summary>
         <div className="email-watch-grid">{activity.map(item=><div className="email-watch-row" key={item.id}><div><strong>{item.title}</strong><small>{item.message}</small></div><span className="email-label">{item.category==="ACTION_REQUIRED"?"Needs attention":item.category==="AUTOMATION_EXECUTED"?"Done by Jiraya":"Update"}</span></div>)}</div>
       </details>}
@@ -141,7 +143,7 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
       <div className="email-layout">
         <section className="email-list" aria-label="Conversations">
           {!visible.length && <div className="email-empty"><h2>No conversations here yet</h2><p>{role==="ASSISTANT"?"Try a different filter or ask your client to load the demo.":"Connect Gmail through Jiraya services, then sync your inbox, or load sample conversations to explore the workflow."}</p>
-            {role==="CLIENT" && <button className="email-primary" disabled={busy} onClick={()=>action(()=>api.emailSeedDemo(),"Sample conversations added.")}>Try sample inbox</button>}
+            <button className="email-primary" disabled={busy} onClick={()=>action(()=>api.emailSeedDemo(),"Sample conversations ready to try again.")}>Try sample inbox</button>
           </div>}
           {visible.map(item=><button className={`email-row ${selected?.id===item.id?"selected":""}`} key={item.id} onClick={()=>void open(item.id)}>
             <span className="email-row-top"><strong>{item.sender}</strong><small>{new Date(item.updated_at).toLocaleDateString()}</small></span>
@@ -149,13 +151,13 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
             <span className="email-row-summary">{item.summary || item.reason}</span>
             <span className="email-row-foot"><span className={`email-label ${item.responsibility.toLowerCase()}`}>{labels[item.responsibility]}</span>
               {item.review_required&&<span className="email-label review">Review AI choice</span>}
-              {item.status!=="OPEN"&&<span className="email-label handled">{item.status==="HANDLED"?"Handled":"Check send"}</span>}
+              {item.status!=="OPEN"&&<span className="email-label handled">{item.status==="HANDLED"?"Handled":item.status==="ON_HOLD"?"On hold":"Check send"}</span>}
               {item.source==="DEMO"&&<span className="email-label demo">Sample</span>}</span>
           </button>)}
         </section>
         <section className="email-detail" aria-label="Conversation detail">
           {!selected ? <div className="email-empty"><h2>Select a conversation</h2><p>Read the thread, understand the assignment, and decide what happens next.</p>
-            {role==="CLIENT" && items.length>0 && <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailSeedDemo(),"Sample conversations added.")}>Add sample cases</button>}
+            {items.length>0 && <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailSeedDemo(),"Sample conversations ready to try again.")}>Reset sample inbox</button>}
           </div> : <>
             <div className="email-detail-head"><div><span className="email-eyebrow">{selected.source==="DEMO"?"SAMPLE CONVERSATION · NO REAL EMAIL SENT":"CONNECTED GMAIL"}</span>
               <h2>{selected.subject}</h2><p>From {selected.sender}</p></div>
@@ -171,22 +173,24 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
               <div><strong>{message.from}</strong><time>{new Date(message.date).toLocaleString()}</time></div>
               <p>{message.body}</p>
             </article>)}</div>
-            {role==="ASSISTANT" ? <>
-              <div className="email-decide"><label>Who should reply next?
+            {role==="ASSISTANT" && <div className="email-decide"><label>Who should reply next?
                 <select value={selected.responsibility} disabled={busy} onChange={e=>action(()=>api.emailUpdate(selected.id,{responsibility:e.target.value as EmailConversation["responsibility"]}),"Assignment updated for both views.",selected.id)}>
                   {Object.keys(labels).map(key=><option value={key} key={key}>{labels[key]}</option>)}
-                </select></label>
-                <button className="email-outline" disabled={busy||selected.status==="SENDING"||selected.status==="SEND_UNCERTAIN"} onClick={()=>action(()=>api.emailUpdate(selected.id,{status:selected.status==="HANDLED"?"OPEN":"HANDLED"}),selected.status==="HANDLED"?"Reopened.":"Marked handled.",selected.id)}>{selected.status==="HANDLED"?"Reopen":"Mark handled"}</button>
-              </div>
-              <div className="email-compose"><h3>Prepare a reply</h3><p>Ask Jiraya for a suggestion or write your own. Review the final text before sending.</p>
-                <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailDraft(selected.id),"AI draft ready for review.",selected.id)}>Suggest a draft</button>
+                </select></label></div>}
+              <div className="email-compose"><h3>Reply to this email</h3><p>{role==="ASSISTANT"?"Ask Jiraya for a suggestion or write your own. Review the final text before sending.":"Write your reply here and send it from your connected Gmail account."}</p>
+                {role==="ASSISTANT" && <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailDraft(selected.id),"AI draft ready for review.",selected.id)}>Suggest a draft</button>}
                 <textarea aria-label="Reply draft" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Write a reply to this conversation…" rows={6}/>
                 <div className="email-compose-actions"><button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailUpdate(selected.id,{draft_body:draft}),"Draft saved.",selected.id)}>Save draft</button>
-                  <button className="email-primary" disabled={busy||!draft.trim()||selected.status!=="OPEN"} onClick={()=>{if(window.confirm(selected.source==="DEMO"?"Simulate this reply? No email will be sent.":"Send this reply from the client's connected Gmail account?")) void action(()=>api.emailSend(selected.id,draft),"Reply processed.",selected.id);}}>{selected.source==="DEMO"?"Simulate reply":"Review & send reply"}</button>
+                  <button className="email-primary" disabled={busy||!draft.trim()||selected.status!=="OPEN"} onClick={()=>{if(window.confirm(selected.source==="DEMO"?"Simulate this reply? No email will be sent.":"Send this reply from the client's connected Gmail account?")) void action(()=>api.emailSend(selected.id,draft),selected.source==="DEMO"?"Sample reply simulated; no email sent.":"Reply sent through Gmail.",selected.id);}}>{selected.source==="DEMO"?"Simulate reply":"Send reply"}</button>
                 </div>
               </div>
-            </> : <div className="email-decide"><button className="email-primary" disabled={busy||selected.status==="HANDLED"} onClick={()=>action(()=>api.emailUpdate(selected.id,{status:"HANDLED"}),"Marked handled.",selected.id)}>I've handled this</button>
-              <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailUpdate(selected.id,{responsibility:"ASSISTANT_TO_REPLY"}),"Delegated to your assistant.",selected.id)}>Ask my assistant to take over</button></div>}
+              {role==="ASSISTANT" ? <div className="email-decide">
+                <button className="email-outline" disabled={busy||selected.status==="SENDING"||selected.status==="SEND_UNCERTAIN"} onClick={()=>action(()=>api.emailUpdate(selected.id,{responsibility:"CLIENT_TO_REPLY",status:"OPEN"}),"Sent to the client's attention.",selected.id)}>Send to client</button>
+                <button className="email-outline" disabled={busy||selected.status==="HANDLED"||selected.status==="SENDING"||selected.status==="SEND_UNCERTAIN"} onClick={()=>{if(window.confirm("Mark done without sending an email? Use this only if the task was completed outside Jiraya."))void action(()=>api.emailUpdate(selected.id,{status:"HANDLED"}),"Marked done.",selected.id);}}>Mark done</button>
+                <button className="email-outline" disabled={busy||selected.status==="HANDLED"||selected.status==="SENDING"||selected.status==="SEND_UNCERTAIN"} onClick={()=>action(()=>api.emailUpdate(selected.id,{status:selected.status==="ON_HOLD"?"OPEN":"ON_HOLD"}),selected.status==="ON_HOLD"?"Resumed.":"On hold.",selected.id)}>{selected.status==="ON_HOLD"?"Resume":"Keep on hold"}</button>
+                {selected.status==="HANDLED" && <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailUpdate(selected.id,{status:"OPEN"}),"Reopened.",selected.id)}>Reopen</button>}
+              </div> : <div className="email-decide"><button className="email-outline" disabled={busy||selected.status==="HANDLED"} onClick={()=>{if(window.confirm("Confirm that you already handled this outside Jiraya? No email will be sent by this action."))void action(()=>api.emailUpdate(selected.id,{status:"HANDLED"}),"Marked handled outside Jiraya.",selected.id);}}>Action taken outside Jiraya</button>
+              <button className="email-outline" disabled={busy} onClick={()=>action(()=>api.emailUpdate(selected.id,{responsibility:"ASSISTANT_TO_REPLY"}),"Delegated to your assistant.",selected.id)}>Ask my personal assistant to take action</button></div>}
           </>}
         </section>
       </div>

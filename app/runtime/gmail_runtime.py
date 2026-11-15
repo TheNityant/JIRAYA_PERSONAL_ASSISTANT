@@ -277,15 +277,8 @@ class GmailRuntimeService:
             # This is independent of watch execution. A triage failure must never prevent
             # the existing email automation or temporal reconciliation from running.
             try:
-                from app.models import AssistantAccess
                 from app.services.email_workspace import ingest_message
-                from sqlalchemy import select
-
-                active = self.db.scalars(
-                    select(AssistantAccess).where(AssistantAccess.client_id == self.settings.dev_user_id).limit(1)
-                ).first()
-                if active:
-                    ingest_message(self.db, self.settings, message)
+                ingest_message(self.db, self.settings, message)
             except Exception:
                 self.db.rollback()
         action = self.actions.latest_verified_for_thread(message.thread_id)

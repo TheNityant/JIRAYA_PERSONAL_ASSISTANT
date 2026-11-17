@@ -5,6 +5,7 @@ import re
 import secrets
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
@@ -56,10 +57,20 @@ class Credentials(BaseModel):
 
 class Registration(Credentials):
     display_name: str = Field(min_length=1, max_length=255)
+    role: Literal["CLIENT", "ASSISTANT"] = "CLIENT"
+
+
+class LoginRequest(Credentials):
+    role: Literal["CLIENT", "ASSISTANT"] | None = None
 
 
 def public_user(user):
-    return {"id": user.id, "email": user.email, "display_name": user.display_name}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "role": user.role,
+    }
 
 
 def rate_limit(db, request):
@@ -102,6 +113,7 @@ def register(
         id=str(uuid.uuid4()),
         email=data.email,
         display_name=data.display_name.strip(),
+        role=data.role,
         password_hash=password_hash(data.password),
     )
     db.add(user)
@@ -117,11 +129,19 @@ def register(
 
 
 @router.post("/login")
-def login(data: Credentials, request: Request, response: Response, db: Session = Depends(get_db)):
+def login(data: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     rate_limit(db, request)
     user = db.scalars(select(User).where(User.email == data.email)).first()
     if not password_matches(data.password, user.password_hash if user else None):
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    # An account owner can choose the assistant *view* of their own inbox.
+    # A delegated assistant still cannot become another client's owner by selecting Client.
+    if (
+        data.role
+        and user.role != data.role
+        and not (user.role == "CLIENT" and data.role == "ASSISTANT")
+    ):
+        raise HTTPException(status_code=403, detail="This account uses the other sign-in option.")
     create_session(db, user, response, get_settings())
     return {"user": public_user(user)}
 

@@ -13,6 +13,103 @@
   --warning: #d7b26d;
 }
 
+/* Email assignment workspace. Shared data; deliberately different views per human role. */
+.email-shell {min-height:calc(100vh - 42px);max-width:1480px;margin:0 auto;padding:38px clamp(18px,4vw,64px) 72px;color:#edf2ef}
+.email-header {display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:30px}
+.email-eyebrow {font-size:10px;letter-spacing:.15em;font-weight:750;color:#95bfa7}
+.email-header h1 {font-size:clamp(30px,3.2vw,46px);letter-spacing:-.045em;margin:10px 0 7px}
+.email-header p,.email-connect p,.email-invite p {color:#9ca9a5;line-height:1.55;margin:0}
+.email-header-actions,.email-compose-actions,.email-decide {display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.email-shell button {transition:background .16s,border-color .16s,transform .16s}
+.email-shell button:disabled {opacity:.5;cursor:not-allowed}
+.email-primary,.email-outline {border-radius:10px;padding:10px 16px;font-size:13px;font-weight:650}
+.email-primary {background:#c5e9d2;color:#12251c;border:1px solid #c5e9d2}
+.email-primary:hover:not(:disabled) {background:#e1f6e8}
+.email-outline {background:#161f1c;color:#dcebe0;border:1px solid #3c5548}
+.email-outline:hover:not(:disabled) {background:#22332a}
+.email-metrics {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:25px}
+.email-metric {border:1px solid #273a31;background:linear-gradient(140deg,#17231d,#111a17);border-radius:16px;padding:20px}
+.email-metric strong {display:block;font-size:29px;line-height:1;margin-bottom:9px;letter-spacing:-.04em}
+.email-metric span {font-size:12px;color:#a5b7ab}
+.email-toolbar {display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:12px}
+.email-tabs {display:flex;gap:5px;flex-wrap:wrap}
+.email-tabs button {border:1px solid transparent;border-radius:10px;color:#9daaa4;background:transparent;padding:9px 13px;font-size:12px}
+.email-tabs button.active,.email-tabs button:hover {background:#203329;border-color:#3d644b;color:#e0f4e5}
+.email-toolbar input,.email-connect input,.email-decide select,.email-compose textarea {background:#101815;border:1px solid #35463a;border-radius:10px;color:#f0f5f0;padding:11px 13px;outline:none}
+.email-toolbar input:focus,.email-connect input:focus,.email-decide select:focus,.email-compose textarea:focus {border-color:#96c9a5}
+.email-toolbar input {width:min(280px,100%)}
+.email-layout {display:grid;grid-template-columns:minmax(300px,39%) minmax(0,1fr);min-height:600px;border:1px solid #304136;border-radius:18px;overflow:hidden;background:#111916}
+.email-list {border-right:1px solid #304136;max-height:780px;overflow:auto}
+.email-row {display:block;width:100%;background:transparent;color:#ecf2ed;border:0;border-bottom:1px solid #29372e;text-align:left;padding:19px 20px}
+.email-row:hover,.email-row.selected {background:#1d2d23}
+.email-row.selected {box-shadow:inset 3px 0 #98c9a7}
+.email-row-top,.email-row-foot {display:flex;justify-content:space-between;align-items:center;gap:10px}
+.email-row-top strong {font-size:13px;overflow:hidden;text-overflow:ellipsis}
+.email-row-top small,.email-detail-head p,.email-thread time {color:#98a69c;font-size:11px}
+.email-row-subject {display:block;margin:9px 0 5px;font-size:14px;font-weight:650}
+.email-row-summary {display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#9cab9f;font-size:12px}
+.email-row-foot {justify-content:flex-start;flex-wrap:wrap;margin-top:13px}
+.email-unread {display:inline-block;width:7px;height:7px;border-radius:50%;background:#8dd5a3;margin-right:8px}
+.email-label {display:inline-block;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:700;white-space:nowrap;background:#28372f;color:#d5e6d9}
+.email-label.client_to_reply {background:#3a2e23;color:#ffdb9e}
+.email-label.no_reply_needed {background:#28313a;color:#b9ccdf}
+.email-label.review {background:#492e36;color:#ffccd5}
+.email-label.handled {background:#1c4934;color:#b8e8ca}
+.email-label.demo {border:1px dashed #627569;background:transparent;color:#abb9ae}
+.email-detail {padding:25px clamp(16px,2.5vw,34px);max-height:780px;overflow:auto}
+.email-detail-head {display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.email-detail h2 {font-size:24px;letter-spacing:-.03em;margin:8px 0}
+.email-star {border:0;background:transparent;font-size:27px;color:#f4d889}
+.email-ai {border:1px solid #47624e;background:#1b2d22;border-radius:14px;padding:18px;margin:21px 0}
+.email-ai p {font-size:15px;line-height:1.55;margin:9px 0 13px}
+.email-ai div {display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:#aebeb1;font-size:12px}
+.email-ai small {display:block;color:#f7c6a2;margin-top:12px}
+.email-thread h3,.email-compose h3 {font-size:15px;margin:23px 0 12px}
+.email-thread article {border:1px solid #304137;border-radius:12px;padding:16px;margin-bottom:10px;background:#151f19}
+.email-thread article div {display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.email-thread article strong {font-size:12px}.email-thread article p {font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:0;color:#d1ded3}
+.email-decide {border-top:1px solid #304137;padding-top:20px;margin-top:23px}
+.email-decide label {font-size:12px;color:#b4c2b6;display:grid;gap:7px}.email-decide select {min-width:190px}
+.email-compose {border-top:1px solid #304137;margin-top:20px}.email-compose p {color:#9aa99e;font-size:12px}
+.email-compose textarea {display:block;width:100%;resize:vertical;margin:13px 0;line-height:1.55}
+.email-compose-actions {justify-content:flex-end}
+.email-empty {padding:48px 24px;color:#a4b3a7;text-align:center}.email-empty h2 {font-size:18px;color:#e6f0e7}
+.email-connect {max-width:580px;margin:60px auto;padding:34px;border:1px solid #355240;border-radius:18px;background:#17251b}
+.email-connect h2 {font-size:25px}.email-connect form {display:flex;gap:9px;margin-top:24px}.email-connect input {flex:1;min-width:0}
+.email-invite {border:1px solid #304538;border-radius:12px;padding:13px 16px;margin-bottom:24px;background:#15221a;font-size:12px}
+.email-invite summary {cursor:pointer;color:#d7ebdc;font-weight:700}.email-invite p {margin:12px 0}
+.email-invite code {display:block;overflow-wrap:anywhere;margin-top:12px;padding:12px;border-radius:8px;background:#0f1712}
+.email-invite button {margin:8px 8px 0 0}
+.email-watches {border:1px solid #304538;border-radius:12px;padding:14px 16px;margin-bottom:22px;background:#121d16}
+.email-watches summary {cursor:pointer;font-weight:700;color:#d7ebdc}
+.email-watches summary span {font-size:11px;color:#a5b9a9;font-weight:400;margin-left:9px}
+.email-watches > p {color:#a4b5a8;font-size:12px;line-height:1.5}
+.email-watch-grid {display:grid;gap:7px;margin:14px 0}
+.email-watch-row {border:1px solid #34483a;border-radius:10px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:14px}
+.email-watch-row strong,.email-watch-row small {display:block}
+.email-watch-row small {color:#a4b5a8;margin-top:5px;line-height:1.4}
+.email-watch-actions {display:flex;gap:7px;flex-wrap:wrap}
+.email-watch-form {border-top:1px solid #35483a;padding-top:15px;display:grid;gap:10px;max-width:760px}
+.email-watch-form h3 {font-size:15px;margin:0}
+.email-watch-form > div {display:flex;gap:10px;flex-wrap:wrap}
+.email-watch-form label {display:grid;gap:5px;font-size:12px;color:#abbcae}
+.email-watch-form input,.email-watch-form textarea,.email-watch-form select {background:#101815;border:1px solid #35463a;border-radius:9px;color:#f0f5f0;padding:10px}
+.email-watch-form > button {justify-self:start}
+.email-preview {margin-bottom:16px}.email-preview p {font-size:12px;color:#a4b5a8;line-height:1.5;margin:0}
+.email-preview output {padding:12px;border-radius:9px;background:#233728;color:#e0f2e3;font-size:12px;line-height:1.5}
+.email-alert,.email-success {border-radius:9px;padding:12px 15px;margin:12px 0;font-size:13px}
+.email-alert {background:#3c2428;color:#ffd6d9}.email-success {background:#203b29;color:#d5f1db}
+.email-reclassify {margin-top:14px}
+.email-toast {position:fixed;bottom:20px;right:20px;z-index:100;max-width:min(390px,calc(100vw - 32px));display:flex;gap:13px;align-items:center;background:#213628;border:1px solid #73a67c;border-radius:13px;padding:12px 14px;box-shadow:0 16px 40px #0009;color:#f3faf2}
+.email-toast div {min-width:0;flex:1}.email-toast strong,.email-toast span {display:block}.email-toast strong {font-size:12px}.email-toast span {font-size:11px;color:#b6cab9;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin-top:4px}
+.email-toast button {border:1px solid #77a986;border-radius:7px;background:#2d4935;color:#edfaef;padding:7px;font-size:11px}
+.email-role-options {display:flex;gap:8px;margin:18px 0}
+.email-role-options button {border:1px solid #354b3a;background:#18221b;color:#c9d7cd;border-radius:9px;padding:10px 13px}
+.email-role-options button.active {background:#c5e9d2;color:#152319}
+.account-bar-actions {display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:900px) {.email-metrics {grid-template-columns:repeat(2,minmax(0,1fr))}.email-layout {grid-template-columns:minmax(0,1fr)}.email-list {border-right:0;border-bottom:1px solid #304136;max-height:360px}.email-detail {max-height:none}}
+@media(max-width:600px) {.email-header,.email-toolbar {align-items:stretch;flex-direction:column}.email-toolbar input {width:100%}.email-metrics {gap:8px}.email-metric {padding:14px}.email-connect form {flex-direction:column}.email-shell {padding:20px 12px 55px}.email-detail {padding:18px}.email-tabs {overflow-x:auto;flex-wrap:nowrap}.email-tabs button {white-space:nowrap}}
+
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
 body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -240,6 +337,8 @@ button { cursor: pointer; }
 .account-card p { color: var(--muted); line-height: 1.6; }
 .account-card form { display: grid; gap: 18px; margin: 24px 0 14px; }
 .account-card input { width: 100%; box-sizing: border-box; }
+.account-card .email-delegate-choice { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; }
+.account-card .email-delegate-choice input { width: auto; flex: none; margin-top: 4px; }
 .account-card .primary-button { margin-top: 12px; }
 .account-error { color: #f0a1a1 !important; padding: 8px 16px; }
 .account-bar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 24px; background: #11151a; border-bottom: 1px solid var(--border); }

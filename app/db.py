@@ -56,6 +56,7 @@ def _tenant_queries(state):
             Notification,
             OAuthState,
             Obligation,
+            EmailConversation,
         )
 
         for model in (
@@ -70,6 +71,7 @@ def _tenant_queries(state):
             Connection,
             Notification,
             OAuthState,
+            EmailConversation,
         ):
             state.statement = state.statement.options(
                 with_loader_criteria(model, model.user_id == tenant, include_aliases=True)
@@ -143,4 +145,8 @@ def init_db() -> None:
             c["name"] for c in inspector.get_columns("users")
         }:
             connection.execute(text("ALTER TABLE users ADD COLUMN password_hash TEXT"))
+        if "users" in existing and "role" not in {
+            c["name"] for c in inspector.get_columns("users")
+        }:
+            connection.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'CLIENT'"))
         Base.metadata.create_all(bind=connection)

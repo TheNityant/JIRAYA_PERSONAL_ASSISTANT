@@ -169,12 +169,14 @@ export type GmailRuntimeStatus = {
 export const API_BASE = process.env.NEXT_PUBLIC_JIRAYA_API_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const assistantView = typeof window !== "undefined" && path.startsWith("/email-workspace") && sessionStorage.getItem("jiraya.workspace_mode") === "ASSISTANT";
   const response = await fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     credentials: "include",
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(assistantView ? {"X-Jiraya-Workspace-Mode": "ASSISTANT"} : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -190,13 +192,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export type Account = {id: string; email: string; display_name: string};
+export type Account = {id: string; email: string; display_name: string; role: "CLIENT" | "ASSISTANT"};
 export type AccountState = {user: Account | null; auth_required: boolean; registration_enabled: boolean};
+
+export type EmailConversation = {
+  id: string; source: "DEMO" | "GMAIL"; subject: string; sender: string;
+  responsibility: "ASSISTANT_TO_REPLY" | "CLIENT_TO_REPLY" | "NO_REPLY_NEEDED";
+  suggested_responsibility: string | null; confidence: number; reason: string; summary: string;
+  manual_override: boolean; review_required: boolean; status: "OPEN" | "ON_HOLD" | "HANDLED" | "SENDING" | "SEND_UNCERTAIN";
+  important: boolean; unread: boolean; updated_at: string; draft_body: string;
+  messages?: Array<{id: string; from: string; subject: string; body: string; date: number}>;
+};
+export type EmailOverview = {role: "CLIENT" | "ASSISTANT"; linked: boolean; client: {display_name: string; email: string} | null; items: EmailConversation[]};
+export type EmailWatch = {id:string;name:string;enabled:boolean;condition:string;action:"NOTIFY"|"DRAFT_REPLY";instructions:string;approval_policy:"REQUIRED"|"AUTO"|"DRAFT_ONLY"};
+export type EmailActivity = {id:string;category:string;title:string;message:string;source:string;created_at:string;read_at:string|null};
 
 export type MeetBrowserSetup = {id:string;status:string;reason:string;expires_at:string;next_sequence:number;calendar_account:string;frame?:{image:string;width:number;height:number;origin:string;captured_at:string}};
 export type MeetBrowserInput = {kind:"click"|"text"|"key"|"scroll";x?:number;y?:number;text?:string;key?:string;delta?:number};
 
 export const api = {
+  emailBackendReady: async () => {
+    try {
+      const response = await fetch(`${API_BASE}/openapi.json`, {cache: "no-store", credentials: "include"});
+      if (!response.ok) return false;
+      const description = await response.json();
+      return Boolean(description?.paths?.["/email-workspace"]?.get && description?.components?.schemas?.Registration?.properties?.role);
+    } catch { return false; }
+  },
   startMeetBrowser: () => request<MeetBrowserSetup>("/meet/cloud/browser/sessions", {method:"POST",body:JSON.stringify({consent:true})}),
   meetBrowser: (id:string) => request<MeetBrowserSetup>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}`),
   meetBrowserInput: (id:string, sequence:number, events:MeetBrowserInput[]) => request<{accepted:boolean;next_sequence:number}>(`/meet/cloud/browser/sessions/${encodeURIComponent(id)}/input`,{method:"POST",body:JSON.stringify({sequence,events})}),
@@ -214,9 +236,27 @@ export const api = {
   developerBriefingStatus: () => request<{configured: boolean; message: string; provider: "hermes" | "bharatcode"}>("/github/briefing/status"),
   createDeveloperBriefing: (repositories: string[]) => request<DeveloperBriefingResult>("/github/briefing", {method: "POST", signal: AbortSignal.timeout(180000), body: JSON.stringify({repositories})}),
   account: () => request<AccountState>("/auth/me"),
-  login: (email: string, password: string) => request<{user: Account}>("/auth/login", {method: "POST", body: JSON.stringify({email, password})}),
-  register: (display_name: string, email: string, password: string) => request<{user: Account}>("/auth/register", {method: "POST", body: JSON.stringify({display_name, email, password})}),
+  login: (email: string, password: string, role: Account["role"]) => request<{user: Account}>("/auth/login", {method: "POST", body: JSON.stringify({email, password, role})}),
+  register: (display_name: string, email: string, password: string, role: Account["role"]) => request<{user: Account}>("/auth/register", {method: "POST", body: JSON.stringify({display_name, email, password, role})}),
   logout: () => request<{signed_out: boolean}>("/auth/logout", {method: "POST"}),
+  emailOverview: () => request<EmailOverview>("/email-workspace"),
+  emailInvitation: () => request<{code: string; expires_in_hours: number}>("/email-workspace/invitation", {method:"POST"}),
+  emailJoin: (code: string) => request<{linked: boolean; client: string}>("/email-workspace/join", {method:"POST", body:JSON.stringify({code})}),
+  emailSeedDemo: () => request<{created: number; source: string}>("/email-workspace/demo", {method:"POST"}),
+  emailRevoke: () => request<{revoked:number}>("/email-workspace/revoke", {method:"POST"}),
+  emailWatches: () => request<EmailWatch[]>("/email-workspace/watches"),
+  emailActivity: () => request<EmailActivity[]>("/email-workspace/activity"),
+  emailCreateWatch: (input:{name:string;condition:string;action:"NOTIFY"|"DRAFT_REPLY";instructions:string;approval_policy:"REQUIRED"|"AUTO"}) =>
+    request<EmailWatch>("/email-workspace/watches", {method:"POST",body:JSON.stringify(input)}),
+  emailSetWatch: (id:string,enabled:boolean) => request<EmailWatch>(`/email-workspace/watches/${encodeURIComponent(id)}?enabled=${enabled}`,{method:"PATCH"}),
+  emailPreviewWatch: (id:string,input:{sender:string;subject:string;body:string}) => request<{matches:boolean;confidence:number;reason:string;action:string;decision:string;simulated:boolean;sent:boolean}>(`/email-workspace/watches/${encodeURIComponent(id)}/preview`,{method:"POST",body:JSON.stringify(input)}),
+  emailSync: () => request<{processed: number; total: number}>("/email-workspace/sync", {method:"POST"}),
+  emailDetail: (id: string) => request<EmailConversation>(`/email-workspace/${encodeURIComponent(id)}`),
+  emailClassify: (id: string) => request<EmailConversation>(`/email-workspace/${encodeURIComponent(id)}/classify`, {method:"POST"}),
+  emailUpdate: (id: string, input: Partial<Pick<EmailConversation, "responsibility" | "status" | "important" | "unread" | "draft_body">>) =>
+    request<EmailConversation>(`/email-workspace/${encodeURIComponent(id)}`, {method:"PATCH",body:JSON.stringify(input)}),
+  emailDraft: (id: string) => request<EmailConversation>(`/email-workspace/${encodeURIComponent(id)}/draft`, {method:"POST"}),
+  emailSend: (id: string, body: string) => request<{sent:boolean;simulated:boolean;conversation:EmailConversation}>(`/email-workspace/${encodeURIComponent(id)}/send`, {method:"POST",body:JSON.stringify({body})}),
   startConnection: (provider: "gmail" | "google_calendar" | "github") => {
     const paths = {gmail: "/connections/google/start", google_calendar: "/connections/google/calendar/start", github: "/connections/github/start"};
     return request<{authorization_url: string}>(`${paths[provider]}?response_mode=json`);

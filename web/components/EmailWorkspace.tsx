@@ -171,7 +171,7 @@ export default function EmailWorkspace({role, onLegacy}: {role: "CLIENT" | "ASSI
             </div>
             <div className="email-thread"><h3>Conversation</h3>{selected.messages?.map(message=><article key={message.id}>
               <div><strong>{message.from}</strong><time>{new Date(message.date).toLocaleString()}</time></div>
-              <p>{message.body}</p>
+              <p className="email-message-body">{message.body}</p>
             </article>)}</div>
             {role==="ASSISTANT" && <div className="email-decide"><label>Who should reply next?
                 <select value={selected.responsibility} disabled={busy} onChange={e=>action(()=>api.emailUpdate(selected.id,{responsibility:e.target.value as EmailConversation["responsibility"]}),"Assignment updated for both views.",selected.id)}>

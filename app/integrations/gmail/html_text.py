@@ -1,6 +1,7 @@
 """Convert HTML mail to text while retaining visible labels and safe link targets."""
 
 from html.parser import HTMLParser
+import re
 
 from app.integrations.gmail.content import valid_web_url
 
@@ -46,4 +47,8 @@ def html_to_text(value: str) -> str:
     parser = EmailTextParser()
     parser.feed(value)
     parser.close()
-    return "".join(parser.parts)
+    text = "".join(parser.parts).replace("\xa0", " ")
+    # Branded mail uses nested tables and layout elements, which otherwise
+    # produce hundreds of blank lines in the plain-text conversation view.
+    text = re.sub(r"[^\S\n]+", " ", text)
+    return re.sub(r"\n(?:\s*\n){2,}", "\n\n", text).strip()

@@ -68,6 +68,8 @@
 .email-thread article {border:1px solid #304137;border-radius:12px;padding:16px;margin-bottom:10px;background:#151f19}
 .email-thread article div {display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .email-thread article strong {font-size:12px}.email-thread article p {font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:0;color:#d1ded3}
+.email-thread article {min-width:0;overflow:hidden}
+.email-thread .email-message-body {max-height:420px;overflow:auto;overflow-wrap:anywhere;word-break:break-word;padding-right:8px}
 .email-decide {border-top:1px solid #304137;padding-top:20px;margin-top:23px}
 .email-decide label {font-size:12px;color:#b4c2b6;display:grid;gap:7px}.email-decide select {min-width:190px}
 .email-compose {border-top:1px solid #304137;margin-top:20px}.email-compose p {color:#9aa99e;font-size:12px}

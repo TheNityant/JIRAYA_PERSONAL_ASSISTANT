@@ -1,10 +1,34 @@
 import uuid
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_base_settings
 from app.main import app
+
+
+def test_long_gmail_message_is_readable_without_expanding_ai_prompt(monkeypatch):
+    from app.integrations.gmail.models import GmailMessage
+    from app.services import email_workspace as service
+    from app.integrations.gmail import connection
+
+    long_body = "Offer details: " + "A" * 9000 + " Important details at the end."
+    message = GmailMessage(id="long-mail", thread_id="thread-long", sender="brand@example.test",
+                           sender_name="Brand", reply_to=None, to="owner@example.test",
+                           subject="Offer", rfc_message_id=None, snippet="Offer", body=long_body)
+    db = MagicMock()
+    db.scalars.return_value.first.return_value = None
+    monkeypatch.setattr(connection, "get_gmail_client", lambda *_: SimpleNamespace(get_thread_messages=lambda _: [message]))
+    observed = []
+    monkeypatch.setattr(service, "decide", lambda _settings, history: observed.append(history) or {
+        "classification": "NO_REPLY_NEEDED", "confidence": 0.9,
+        "reason": "Promotion", "summary": "Offer", "review_required": False,
+    })
+    row = service.ingest_message(db, SimpleNamespace(dev_user_id="owner"), message)
+    assert row.messages[0]["body"].endswith("Important details at the end.")
+    assert len(observed[0][0]["body"]) == 3500
 
 ORIGIN = {"Origin": "http://127.0.0.1:3000"}
 PASSWORD = "correct horse battery staple!"

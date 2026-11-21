@@ -74,14 +74,16 @@ def ingest_message(db: Session, settings, message: GmailMessage) -> EmailConvers
             "id": item.id,
             "from": item.sender,
             "subject": item.subject,
-            "body": item.body[:3500],
+            "body": item.body[:50000],
             "date": item.internal_date_ms,
         }
         for item in thread[-12:]
     ]
     # The runtime invokes this after the existing watch engine; watches remain authoritative
     # for whether any action may execute, while responsibility is independently classified.
-    result = decide(settings, history)
+    # Keep the conversation readable without sending oversized marketing mail
+    # to the classification model.
+    result = decide(settings, [{**item, "body": item["body"][:3500]} for item in history])
     row = existing or EmailConversation(
         user_id=settings.dev_user_id, external_thread_id=message.thread_id
     )

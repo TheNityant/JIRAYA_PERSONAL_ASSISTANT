@@ -150,3 +150,14 @@ def test_html_alternative_adds_button_target_missing_from_plain_text_before_quot
     body = GmailClient._extract_body(payload)
     assert source_links(body) == [LINK]
     assert "Old message" in body  # Raw quoted evidence remains available.
+def test_branded_html_mail_keeps_text_and_links_without_layout_whitespace():
+    from app.integrations.gmail.html_text import html_to_text
+
+    body = html_to_text(
+        '<div><img src="https://example.com/banner.png" alt="Banner">'
+        '<table><tr><td><h1>Offer details</h1></td></tr></table></div>'
+        '<div><br><br><br><a href="https://example.com/offer">Read offer</a></div>'
+    )
+    assert "Offer details" in body
+    assert "Read offer <https://example.com/offer>" in body
+    assert "\n\n\n" not in body

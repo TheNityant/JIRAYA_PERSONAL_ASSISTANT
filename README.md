@@ -1,6 +1,10 @@
 # Jiraya Personal Assistant
 
-Jiraya is an evidence-aware Personal AI for the **Nebius × NVIDIA Global AI Hackathon 2026 — Personal AI** track.
+Jiraya is a personal AI assistant that connects Gmail, Google Calendar, and
+GitHub, with optional Google Meet attendance. It combines configurable automations
+with an email workspace where a client and human assistant can review conversations, prepare replies,
+and hand off decisions. The project began in the **Nebius × NVIDIA Global AI
+Hackathon 2026 — Personal AI** track.
 
 Core product loop:
 
@@ -10,8 +14,9 @@ Agent -> Verifier -> Event Ledger -> Reconciliator
 
 The distinguishing mechanism is temporal outcome assurance: Jiraya records evidence that an action really succeeded, then later uses event history to distinguish an original execution failure from an outcome that was legitimately superseded or externally invalidated afterward.
 
-# Contributor
-JAY LOHAR AND NITYANT TIWARI.
+## Contributors
+
+Jay Lohar and Nityant Tiwari.
 
 ## Frontend account and connection flow (Phase 2e)
 

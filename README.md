@@ -69,7 +69,11 @@ guide](docs/MEET_INTEGRATION.md). This attendance runtime does not enable record
 transcription or voice replies. A live Google browser session, host admission and
 a running local computer may be required.
 
-## Current implementation: Phase 1 Gmail vertical slice
+## Historical Phase 1 Gmail vertical slice
+
+The following standalone CLI workflow documents the original Gmail prototype.
+For the current account-based application, start with the connection and email
+workspace guides above.
 
 ```text
 Unread Gmail message
@@ -103,7 +107,7 @@ PostgreSQL Event Ledger
 
 Real external actions are safety-gated. `dry_run=true` is the default, and a non-dry run is still blocked while `ENABLE_EXTERNAL_ACTIONS=false`.
 
-## Setup
+## Phase 1 setup
 
 Use the Phase 1 branch:
 
@@ -250,16 +254,6 @@ Phase 1 adds tests for structured email classification, deterministic Gmail veri
 - Verifier returns `VERIFIED_SUCCESS`
 - Event Ledger contains the complete evidence chain
 - `python -m pytest` passes
-
-## Intentionally deferred
-
-- Always-on Gmail Pub/Sub watcher
-- Temporal reconciliation of later replies/bounces
-- Calendar/GitHub connectors
-- Free-form autonomous email replies
-- LangSmith tracing
-
-Those come after this vertical slice is reliable.
 
 ### Checkpoint your open development projects
 

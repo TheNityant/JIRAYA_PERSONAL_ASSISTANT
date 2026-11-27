@@ -33,6 +33,18 @@ See [service integrations and deployment](docs/SERVICE_INTEGRATIONS.md#frontend-
 for account sessions, connection setup, production URLs and existing-workspace handling.
 The sections below retain the original Phase 1 standalone CLI workflow for reference.
 
+## Email workspace walkthrough
+
+The account owner can choose Client or Assistant view with the same credentials.
+The Assistant view can review conversations and configure Gmail watches; the
+Client view focuses on conversations assigned to the client. A separate human
+assistant needs a client invitation to access someone else's workspace.
+
+For a walkthrough without Google credentials, use **Try sample inbox** in the
+Email workspace. For live mail, connect Gmail and follow the confirmation steps
+before sending a reply. The [email workspace guide](docs/EMAIL_ASSIGNMENT.md)
+explains the sample cases, view switching, Gmail sync, and sending requirements.
+
 ## Meet deployment mode
 
 Meet opens the cloud attendance and summaries controls. Enabling requires an

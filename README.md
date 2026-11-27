@@ -1,6 +1,10 @@
 # Jiraya Personal Assistant
 
-Jiraya is an evidence-aware Personal AI for the **Nebius × NVIDIA Global AI Hackathon 2026 — Personal AI** track.
+Jiraya is a personal AI assistant that connects Gmail, Google Calendar, and
+GitHub, with optional Google Meet attendance. It combines configurable automations
+with an email workspace where a client and human assistant can review conversations, prepare replies,
+and hand off decisions. The project began in the **Nebius × NVIDIA Global AI
+Hackathon 2026 — Personal AI** track.
 
 Core product loop:
 
@@ -10,8 +14,9 @@ Agent -> Verifier -> Event Ledger -> Reconciliator
 
 The distinguishing mechanism is temporal outcome assurance: Jiraya records evidence that an action really succeeded, then later uses event history to distinguish an original execution failure from an outcome that was legitimately superseded or externally invalidated afterward.
 
-# Contributor
-JAY LOHAR AND NITYANT TIWARI.
+## Contributors
+
+Jay Lohar and Nityant Tiwari.
 
 ## Frontend account and connection flow (Phase 2e)
 
@@ -27,6 +32,18 @@ Jiraya registration does not grant Google test-user access.
 See [service integrations and deployment](docs/SERVICE_INTEGRATIONS.md#frontend-sign-in-and-connections)
 for account sessions, connection setup, production URLs and existing-workspace handling.
 The sections below retain the original Phase 1 standalone CLI workflow for reference.
+
+## Email workspace walkthrough
+
+The account owner can choose Client or Assistant view with the same credentials.
+The Assistant view can review conversations and configure Gmail watches; the
+Client view focuses on conversations assigned to the client. A separate human
+assistant needs a client invitation to access someone else's workspace.
+
+For a walkthrough without Google credentials, use **Try sample inbox** in the
+Email workspace. For live mail, connect Gmail and follow the confirmation steps
+before sending a reply. The [email workspace guide](docs/EMAIL_ASSIGNMENT.md)
+explains the sample cases, view switching, Gmail sync, and sending requirements.
 
 ## Meet deployment mode
 
@@ -52,7 +69,11 @@ guide](docs/MEET_INTEGRATION.md). This attendance runtime does not enable record
 transcription or voice replies. A live Google browser session, host admission and
 a running local computer may be required.
 
-## Current implementation: Phase 1 Gmail vertical slice
+## Historical Phase 1 Gmail vertical slice
+
+The following standalone CLI workflow documents the original Gmail prototype.
+For the current account-based application, start with the connection and email
+workspace guides above.
 
 ```text
 Unread Gmail message
@@ -86,7 +107,7 @@ PostgreSQL Event Ledger
 
 Real external actions are safety-gated. `dry_run=true` is the default, and a non-dry run is still blocked while `ENABLE_EXTERNAL_ACTIONS=false`.
 
-## Setup
+## Phase 1 setup
 
 Use the Phase 1 branch:
 
@@ -233,16 +254,6 @@ Phase 1 adds tests for structured email classification, deterministic Gmail veri
 - Verifier returns `VERIFIED_SUCCESS`
 - Event Ledger contains the complete evidence chain
 - `python -m pytest` passes
-
-## Intentionally deferred
-
-- Always-on Gmail Pub/Sub watcher
-- Temporal reconciliation of later replies/bounces
-- Calendar/GitHub connectors
-- Free-form autonomous email replies
-- LangSmith tracing
-
-Those come after this vertical slice is reliable.
 
 ### Checkpoint your open development projects
 
